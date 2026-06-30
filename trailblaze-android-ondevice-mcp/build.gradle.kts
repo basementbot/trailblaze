@@ -11,6 +11,10 @@ android {
   compileSdk = 36
   defaultConfig {
     minSdk = 26
+    // Explicit targetSdk so the on-device runner APK isn't blocked by Play Protect on
+    // modern Android ("built for an older version of Android"). trailblaze-android already
+    // sets this; the runner module was missing it.
+    targetSdk = 36
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     testApplicationId = "xyz.block.trailblaze.runner"
   }
