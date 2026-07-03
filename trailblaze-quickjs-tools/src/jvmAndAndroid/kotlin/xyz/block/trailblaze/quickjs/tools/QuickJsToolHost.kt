@@ -1,10 +1,10 @@
 package xyz.block.trailblaze.quickjs.tools
 
 import com.dokar.quickjs.QuickJs
-import com.dokar.quickjs.binding.asyncFunction
 import com.dokar.quickjs.binding.function
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -366,14 +366,26 @@ class QuickJsToolHost internal constructor(
           val quickJs = QuickJs.create(engineDispatcher)
           try {
             if (hostBinding != null) {
-              // Async binding so JS can `await __trailblazeCall(name, argsJson)`. Returns the
-              // result-JSON string the SDK shim will JSON.parse on the JS side.
-              quickJs.asyncFunction(HOST_CALL_BINDING) { args ->
+              // SYNCHRONOUS binding (deliberately NOT `asyncFunction`). JS still does
+              // `await __trailblazeCall(name, argsJson)` — awaiting the returned string just
+              // resolves to it — and the SDK shim JSON.parses the result on the JS side.
+              //
+              // Why sync instead of async: quickjs-kt 1.0.5's async-function invoke path
+              // (`js_async_function_resume` -> `jni_invoke_async_function` -> `jni_CallObjectMethod`
+              // on the callback ref) SIGSEGVs the entire daemon JVM when a scripted `.ts` tool
+              // awaits a host tool on-device (block/trailblaze#194) — a JNI reference-lifecycle bug
+              // in the library, not a threading one (it recurs even on the fix's dedicated single
+              // engine thread). A synchronous binding never enters that async-resume machinery.
+              //
+              // Blocking the dedicated single engine thread on the suspend host call is safe here:
+              // the JS is `await`ing this call and has nothing else to do, and the host dispatch
+              // runs its own I/O off this thread, resuming back through runBlocking's event loop.
+              quickJs.function(HOST_CALL_BINDING) { args ->
                 val name = args.getOrNull(0) as? String
                   ?: error("$HOST_CALL_BINDING called without a tool name string")
                 val argsJson = args.getOrNull(1) as? String
                   ?: error("$HOST_CALL_BINDING called without an argsJson string")
-                hostBinding.callFromBundle(name, argsJson)
+                runBlocking { hostBinding.callFromBundle(name, argsJson) }
               }
             }
             // `console.log`/`error`/`warn`/`info` shim — author code from any Node-flavored
