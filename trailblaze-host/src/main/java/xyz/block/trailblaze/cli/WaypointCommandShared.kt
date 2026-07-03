@@ -10,6 +10,7 @@ import xyz.block.trailblaze.config.project.TrailblazeProjectConfigLoader
 import xyz.block.trailblaze.config.project.TrailblazeTrailmapManifestLoader
 import xyz.block.trailblaze.config.project.TrailblazeWorkspaceConfigResolver
 import xyz.block.trailblaze.llm.config.TrailblazeConfigPaths
+import xyz.block.trailblaze.scripting.AnalyzerScriptedToolEnrichment
 import xyz.block.trailblaze.util.Console
 import xyz.block.trailblaze.waypoint.SessionLogScreenState
 import xyz.block.trailblaze.waypoint.WaypointLoader
@@ -332,6 +333,10 @@ private fun loadResolvedConfig(fromPath: java.nio.file.Path) =
     TrailblazeProjectConfigLoader.loadResolvedRuntime(
       configFile = configFile,
       includeClasspathTrailmaps = true,
+      // Analyzer-backed enrichment (as CompileCommand/HostYamlRunner install) so scripted-tool
+      // (`.ts`) trailmaps resolve instead of being skipped with a "No ScriptedToolEnrichment was
+      // wired" warning that drops their waypoints.
+      scriptedToolEnrichment = AnalyzerScriptedToolEnrichment.resolveFromEnvironment(),
     )
   } ?: TrailblazeProjectConfigLoader.resolveRuntime(
     loaded = LoadedTrailblazeProjectConfig(
@@ -339,6 +344,7 @@ private fun loadResolvedConfig(fromPath: java.nio.file.Path) =
       sourceFile = File(".").absoluteFile,
     ),
     includeClasspathTrailmaps = true,
+    scriptedToolEnrichment = AnalyzerScriptedToolEnrichment.resolveFromEnvironment(),
   )
 
 /** Renders a [WaypointMatchResult] into a multi-line, human-friendly string. */
