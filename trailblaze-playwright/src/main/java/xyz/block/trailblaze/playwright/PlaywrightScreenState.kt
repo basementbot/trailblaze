@@ -1074,13 +1074,69 @@ class PlaywrightScreenState(
     // Build ARIA descriptor occurrence counts to disambiguate duplicate elements
     val descriptorOccurrences = mutableMapOf<String, Int>()
     val deadlineMs = System.currentTimeMillis() + ENRICHMENT_BUDGET_MS
-    return enrichNodeWithLocatorBounds(tree, descriptorOccurrences, deadlineMs)
+    // FAST PATH (block/trailblaze#199): resolve every node's bounds in ONE batched page.evaluate
+    // instead of a per-node Playwright locator round-trip (resolveElementRef + count + boundingBox).
+    // The per-node path saturates ENRICHMENT_BUDGET_MS on ~thousand-node trees and returns PARTIAL
+    // bounds; batching is ~1000× fewer round-trips (measured ~5s → ~4ms). Reuses the same
+    // role/name/nth → element resolution as [BATCH_VIEWPORT_CHECK_JS]. Failures fall through to an
+    // empty map, so [enrichNodeWithLocatorBounds] transparently uses the locator path.
+    val batchedBounds = try {
+      computeTreeBoundsBatched(tree)
+    } catch (_: Exception) {
+      emptyMap()
+    }
+    return enrichNodeWithLocatorBounds(tree, descriptorOccurrences, deadlineMs, batchedBounds)
+  }
+
+  /**
+   * Resolves bounds for ALL nodes of [tree] in a single batched `page.evaluate` (block/trailblaze#199).
+   * Keyed by "descriptor#nth" (the same descriptor + occurrence-index disambiguation
+   * [enrichNodeWithLocatorBounds] uses), so a node looks its bound up in O(1) with no per-node RPC.
+   * Only in-viewport, non-zero-size DOM rects are returned; nodes missing here (e.g. Compose-Web-Wasm
+   * a11y-overlay elements with zero DOM rects) fall back to the locator path.
+   */
+  @Suppress("UNCHECKED_CAST")
+  private fun computeTreeBoundsBatched(tree: ViewHierarchyTreeNode): Map<String, IntArray> {
+    val occ = mutableMapOf<String, Int>()
+    val elements = mutableListOf<Map<String, Any?>>()
+    fun collect(node: ViewHierarchyTreeNode) {
+      val role = node.className ?: "generic"
+      val name = node.text
+      val descriptor = when {
+        name != null && role == "text" -> "text: $name"
+        name != null -> "$role \"$name\""
+        else -> role
+      }
+      val nth = occ.getOrDefault(descriptor, 0)
+      occ[descriptor] = nth + 1
+      elements.add(mapOf("id" to "$descriptor#$nth", "role" to role, "name" to name, "nth" to nth))
+      node.children.forEach { collect(it) }
+    }
+    collect(tree)
+    if (elements.isEmpty()) return emptyMap()
+    val result = page.evaluate(
+      BATCH_VIEWPORT_CHECK_JS,
+      mapOf("elements" to elements, "vw" to viewportWidth, "vh" to viewportHeight),
+    ) as? Map<String, Any?> ?: return emptyMap()
+    val rawBounds = result["bounds"] as? Map<String, Map<String, Any?>> ?: return emptyMap()
+    return rawBounds.mapNotNull { (id, b) ->
+      val x = (b["x"] as? Number)?.toInt()
+      val y = (b["y"] as? Number)?.toInt()
+      val w = (b["w"] as? Number)?.toInt()
+      val h = (b["h"] as? Number)?.toInt()
+      if (x != null && y != null && w != null && h != null && w > 0 && h > 0) {
+        id to intArrayOf(x, y, x + w, y + h)
+      } else {
+        null
+      }
+    }.toMap()
   }
 
   private fun enrichNodeWithLocatorBounds(
     node: ViewHierarchyTreeNode,
     descriptorOccurrences: MutableMap<String, Int>,
     deadlineMs: Long,
+    batchedBounds: Map<String, IntArray>,
   ): ViewHierarchyTreeNode {
     // Bail out of every Playwright RPC once we've blown the wall-clock budget. Returning
     // the unenriched subtree preserves the structural shape for the timeline-viewer
@@ -1114,33 +1170,44 @@ class PlaywrightScreenState(
     val nthIndex = descriptorOccurrences.getOrDefault(descriptor, 0)
     descriptorOccurrences[descriptor] = nthIndex + 1
 
-    // Resolve bounds via Playwright's accessibility-tree-aware locator API
     var bLeft: Int? = null
     var bTop: Int? = null
     var bRight: Int? = null
     var bBottom: Int? = null
-    try {
-      val elementRef = PlaywrightAriaSnapshot.ElementRef(descriptor, nthIndex)
-      val locator = PlaywrightAriaSnapshot.resolveElementRef(page, elementRef)
-      if (locator.count() > 0) {
-        val box = locator.boundingBox(
-          Locator.BoundingBoxOptions().setTimeout(captureTimeoutMs),
-        )
-        if (box != null && box.width > 0 && box.height > 0) {
-          bLeft = box.x.toInt()
-          bTop = box.y.toInt()
-          bRight = (box.x + box.width).toInt()
-          bBottom = (box.y + box.height).toInt()
+    val batched = batchedBounds["$descriptor#$nthIndex"]
+    if (batched != null) {
+      // FAST PATH (block/trailblaze#199): bound already resolved in the one batched page.evaluate.
+      bLeft = batched[0]
+      bTop = batched[1]
+      bRight = batched[2]
+      bBottom = batched[3]
+    } else {
+      // FALLBACK: per-node Playwright locator. Reached only for nodes the batch didn't cover —
+      // notably Compose-Web-Wasm a11y-overlay elements (zero-size DOM rect, valid a11y position).
+      // Resolve bounds via Playwright's accessibility-tree-aware locator API.
+      try {
+        val elementRef = PlaywrightAriaSnapshot.ElementRef(descriptor, nthIndex)
+        val locator = PlaywrightAriaSnapshot.resolveElementRef(page, elementRef)
+        if (locator.count() > 0) {
+          val box = locator.boundingBox(
+            Locator.BoundingBoxOptions().setTimeout(captureTimeoutMs),
+          )
+          if (box != null && box.width > 0 && box.height > 0) {
+            bLeft = box.x.toInt()
+            bTop = box.y.toInt()
+            bRight = (box.x + box.width).toInt()
+            bBottom = (box.y + box.height).toInt()
+          }
         }
+      } catch (_: Exception) {
+        // Resolution failed — leave without bounds
       }
-    } catch (_: Exception) {
-      // Resolution failed — leave without bounds
     }
 
     // Enrich children recursively, threading the same deadline so the whole tree's
     // enrichment shares one wall-clock budget (not a per-node budget).
     val enrichedChildren = node.children.map { child ->
-      enrichNodeWithLocatorBounds(child, descriptorOccurrences, deadlineMs)
+      enrichNodeWithLocatorBounds(child, descriptorOccurrences, deadlineMs, batchedBounds)
     }
 
     return if (bLeft != null && bTop != null && bRight != null && bBottom != null) {
