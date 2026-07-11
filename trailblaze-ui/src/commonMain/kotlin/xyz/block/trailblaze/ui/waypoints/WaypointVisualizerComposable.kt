@@ -954,6 +954,7 @@ private fun DriverBadge(selector: TrailblazeNodeSelector) {
     is DriverNodeMatch.AndroidMaestro -> "android-maestro"
     is DriverNodeMatch.IosMaestro -> "ios-maestro"
     is DriverNodeMatch.IosAxe -> "ios-axe"
+    is DriverNodeMatch.MacOsAx -> "macos-ax"
     is DriverNodeMatch.Web -> "web"
     is DriverNodeMatch.Compose -> "compose"
     null -> "structural"
@@ -1086,6 +1087,18 @@ private fun TrailblazeNodeSelector.toFieldRows(): List<Pair<String, String>> {
       match.titleRegex?.let { rows += "title~" to it }
       match.customAction?.let { rows += "customAction" to it }
       match.enabled?.let { rows += "enabled" to it.toString() }
+    }
+    is DriverNodeMatch.MacOsAx -> {
+      match.roleRegex?.let { rows += "AXRole~" to it }
+      match.subroleRegex?.let { rows += "AXSubrole~" to it }
+      match.roleDescriptionRegex?.let { rows += "AXRoleDescription~" to it }
+      match.titleRegex?.let { rows += "AXTitle~" to it }
+      match.valueRegex?.let { rows += "AXValue~" to it }
+      match.descriptionRegex?.let { rows += "AXDescription~" to it }
+      match.helpRegex?.let { rows += "AXHelp~" to it }
+      match.identifier?.let { rows += "AXIdentifier" to it }
+      match.action?.let { rows += "action" to it }
+      match.attributeEquals?.forEach { (k, v) -> rows += k to v }
     }
     null -> Unit
   }

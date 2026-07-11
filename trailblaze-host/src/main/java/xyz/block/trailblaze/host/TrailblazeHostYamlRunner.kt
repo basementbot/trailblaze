@@ -327,6 +327,8 @@ object TrailblazeHostYamlRunner {
         HostYamlRunResult(runPlaywrightElectronYaml(dynamicLlmClient, runOnHostParams, deviceManager))
       TrailblazeDriverType.COMPOSE ->
         HostYamlRunResult(runComposeYaml(dynamicLlmClient, runOnHostParams, deviceManager))
+      TrailblazeDriverType.MACOS_AX ->
+        HostYamlRunResult(runMacOsAxYaml(dynamicLlmClient, runOnHostParams))
       TrailblazeDriverType.REVYL_ANDROID,
       TrailblazeDriverType.REVYL_IOS ->
         HostYamlRunResult(runRevylYaml(dynamicLlmClient, runOnHostParams, deviceManager))
@@ -690,6 +692,293 @@ object TrailblazeHostYamlRunner {
       cdpPort = cdpPort,
       headless = headless,
     )
+  }
+
+  /**
+   * macOS desktop AX path: drives a running macOS app directly through the Apple Accessibility
+   * (`AXUIElement`) APIs via [MacOsAxTrailblazeAgent] with node-selector tools. Desktop parallel
+   * of [runComposeYaml] — no RPC server, no physical device: the target app is identified by
+   * bundle id (the device instanceId), launched/attached via [MacOsAxAppResolver], and driven
+   * in-process. Recordings replay deterministically; unrecorded prompt steps reach the selected
+   * brain (LLM) exactly as on every other host driver.
+   */
+  private suspend fun runMacOsAxYaml(
+    dynamicLlmClient: DynamicLlmClient,
+    runOnHostParams: RunOnHostParams,
+  ): SessionId? {
+    val onProgressMessage = runOnHostParams.onProgressMessage
+    val runYamlRequest = runOnHostParams.runYamlRequest
+    val trailblazeDeviceId = runYamlRequest.trailblazeDeviceId
+    val bundleId = trailblazeDeviceId.instanceId
+
+    onProgressMessage("Resolving macOS app '$bundleId'...")
+    if (xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.isScreenLocked()) {
+      throw TrailblazeException(
+        "The Mac's screen is locked. macOS blocks Accessibility access to app windows while " +
+          "locked, so the driver can't see or drive '$bundleId'. Unlock the screen (and consider " +
+          "disabling auto-lock for the run) and try again.",
+      )
+    }
+    val pid = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.ensureRunning(bundleId)
+      ?: throw TrailblazeException(
+        "Could not launch or attach to macOS app '$bundleId'. Check the bundle id and that this " +
+          "process has the Accessibility permission (System Settings → Privacy & Security → Accessibility).",
+      )
+    if (!xyz.block.trailblaze.host.macosax.MacOsAxNative.isProcessTrusted()) {
+      throw TrailblazeException(
+        "This process is not Accessibility-trusted; grant it in System Settings → Privacy & " +
+          "Security → Accessibility, then re-run.",
+      )
+    }
+    // A freshly launched/activated app creates its window lazily on foreground — wait for a real
+    // window to appear (re-activating each poll) so the first selector doesn't miss the UI. Best
+    // effort: proceed after the deadline even if none appears (some apps are legitimately
+    // windowless / menu-bar-only).
+    run {
+      val deadline = System.currentTimeMillis() + 8_000
+      while (System.currentTimeMillis() < deadline) {
+        xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.activate(bundleId)
+        if (xyz.block.trailblaze.host.macosax.MacOsAxNative.windowCount(pid) > 0) break
+        kotlinx.coroutines.delay(400)
+      }
+    }
+    val display = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.mainDisplaySize()
+    onProgressMessage("Attached to '$bundleId' (pid=$pid, windows=${xyz.block.trailblaze.host.macosax.MacOsAxNative.windowCount(pid)})")
+
+    val macDeviceManager = xyz.block.trailblaze.host.macosax.MacOsAxDeviceManager(
+      pid = pid,
+      deviceWidth = display.width,
+      deviceHeight = display.height,
+    )
+
+    val trailblazeDeviceInfo = TrailblazeDeviceInfo(
+      trailblazeDeviceId = trailblazeDeviceId,
+      trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+      widthPixels = display.width,
+      heightPixels = display.height,
+      classifiers = listOf(TrailblazeDeviceClassifier("desktop"), TrailblazeDeviceClassifier("macos")),
+    )
+
+    // Every catalog tool declared compatible with the macOS AX driver (via each toolset's
+    // `drivers:` — `desktop`/`all` shorthands include MACOS_AX). This is the node-selector tool
+    // surface (tapOnElementBySelector, assertVisibleBySelector, inputText, …) the trail authors against.
+    // The macOS driver's own `macos_*` tool family (launchApp/tapOnElement/inputText/pressKey/
+    // assertVisible/openUrl) — parallel to the Compose driver's `compose_*` tools. Merged onto the
+    // catalog-resolved surface so macOS trails can author them by name and they deserialize +
+    // dispatch through this run's repo/YAML decoder.
+    val macOsToolClasses = setOf(
+      xyz.block.trailblaze.host.macosax.tools.MacOsLaunchAppTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsTapOnElementTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsInputTextTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsPressKeyTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsAssertVisibleTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsOpenUrlTrailblazeTool::class,
+    )
+    val toolClasses = TrailblazeToolSetCatalog.defaultToolClassesForDriver(TrailblazeDriverType.MACOS_AX) +
+      macOsToolClasses
+    val yamlToolNames = TrailblazeToolSetCatalog.defaultYamlToolNamesForDriver(TrailblazeDriverType.MACOS_AX)
+    val toolRepo = TrailblazeToolRepo(
+      TrailblazeToolSet.DynamicTrailblazeToolSet(
+        name = "macOS AX Tool Set",
+        toolClasses = toolClasses,
+        yamlToolNames = yamlToolNames,
+      ),
+      driverType = TrailblazeDriverType.MACOS_AX,
+    )
+
+    val loggingRule = HostTrailblazeLoggingRule(
+      trailblazeDeviceInfoProvider = { trailblazeDeviceInfo },
+      noLogging = runOnHostParams.noLogging,
+    )
+
+    val agent = xyz.block.trailblaze.host.macosax.MacOsAxTrailblazeAgent(
+      deviceManager = macDeviceManager,
+      trailblazeLogger = loggingRule.logger,
+      trailblazeDeviceInfoProvider = { trailblazeDeviceInfo },
+      sessionProvider = {
+        loggingRule.session ?: error("Session not available - ensure test is running")
+      },
+    )
+
+    val screenStateProvider: () -> xyz.block.trailblaze.api.ScreenState = { macDeviceManager.getScreenState() }
+
+    val elementComparator = TrailblazeElementComparator(
+      screenStateProvider = screenStateProvider,
+      llmClient = dynamicLlmClient.createLlmClient(),
+      trailblazeLlmModel = runYamlRequest.trailblazeLlmModel,
+      toolRepo = toolRepo,
+    )
+
+    val trailblazeRunner: TestAgentRunner =
+      if (runYamlRequest.agentImplementation == AgentImplementation.KOOG_STRATEGY_GRAPH) {
+        KoogTestAgentRunner(
+          agent = agent,
+          toolRepo = toolRepo,
+          screenStateProvider = screenStateProvider,
+          elementComparator = elementComparator,
+          llmClient = dynamicLlmClient.createLlmClient(),
+          trailblazeLlmModel = runYamlRequest.trailblazeLlmModel,
+          logger = loggingRule.logger,
+          sessionProvider = { loggingRule.session ?: error("Session not available - ensure test is running") },
+          maxLlmCalls = runYamlRequest.maxLlmCalls,
+          systemPromptTemplate = TrailblazeRunner.defaultPlatformPrompt,
+        )
+      } else {
+        TrailblazeRunner(
+          screenStateProvider = screenStateProvider,
+          agent = agent,
+          llmClient = dynamicLlmClient.createLlmClient(),
+          trailblazeLlmModel = runYamlRequest.trailblazeLlmModel,
+          trailblazeToolRepo = toolRepo,
+          // Default mobile/desktop system prompt — only reached for unrecorded (LLM-driven)
+          // steps; recorded tools replay without it.
+          systemPromptTemplate = TrailblazeRunner.defaultPlatformPrompt,
+          trailblazeLogger = loggingRule.logger,
+          sessionProvider = {
+            loggingRule.session ?: error("Session not available - ensure test is running")
+          },
+          maxSteps = runYamlRequest.maxLlmCalls ?: TrailblazeRunner.DEFAULT_MAX_STEPS,
+        )
+      }
+
+    val trailblazeYaml = createTrailblazeYaml(customTrailblazeToolClasses = toolClasses)
+
+    val trailblazeRunnerUtil = TrailblazeRunnerUtil(
+      trailblazeRunner = trailblazeRunner,
+      // Execute recorded tools ONE AT A TIME and log a snapshot (accessibility tree + screenshot
+      // PNG) AFTER each, so the session/report shows a screenshot AND the view hierarchy associated
+      // with every action — the same per-step experience the other platforms give. Replay mode has
+      // no LLM loop logging screen states, so without this a macOS AX run produces no per-action
+      // screenshots. Order matters: the tool log (from `runTrailblazeTools`) opens the report's
+      // step group, then this `logSnapshot` — same traceId, logged right after — folds its
+      // screenshot + view hierarchy into that step (see the `TrailblazeSnapshotLog` handling in
+      // trailrunner's run-report-core.ts). `logSnapshot` (unlike `logScreenState`) emits a
+      // viewer-recognized log entry carrying the screenshotFile + trailblazeNodeTree.
+      runTrailblazeTool = { trailblazeTools: List<TrailblazeTool> ->
+        var last: TrailblazeToolResult = TrailblazeToolResult.Success()
+        for (singleTool in trailblazeTools) {
+          last = agent.runTrailblazeTools(
+            listOf(singleTool),
+            runYamlRequest.traceId,
+            screenState = screenStateProvider(),
+            elementComparator = elementComparator,
+            screenStateProvider = screenStateProvider,
+          ).result
+          runCatching {
+            loggingRule.session?.let {
+              loggingRule.logger.logSnapshot(
+                session = it,
+                screenState = screenStateProvider(),
+                displayName = singleTool::class.simpleName?.removeSuffix("TrailblazeTool"),
+                traceId = runYamlRequest.traceId,
+              )
+            }
+          }.onFailure { Console.log("[macOS AX] per-step snapshot log failed: ${it.message}") }
+          if (last is TrailblazeToolResult.Error) break
+        }
+        last
+      },
+      trailblazeLogger = loggingRule.logger,
+      sessionProvider = {
+        loggingRule.session ?: error("Session not available - ensure test is running")
+      },
+      sessionUpdater = { loggingRule.setSession(it) },
+    )
+
+    return executeTrailSession(
+      loggingRule = loggingRule,
+      overrideSessionId = runYamlRequest.config.overrideSessionId,
+      testName = runYamlRequest.testName,
+      deviceLabel = "macos-ax:$bundleId",
+      sendSessionEndLog = runYamlRequest.config.sendSessionEndLog,
+      onProgressMessage = onProgressMessage,
+      screenshotProvider = screenStateProvider,
+      noLogging = runOnHostParams.noLogging,
+      cleanup = { },
+    ) { session ->
+      onProgressMessage("Executing YAML test via macOS AX...")
+      Console.log("▶️ Starting macOS AX execution for '$bundleId' (pid=$pid)")
+
+      val trailItems: List<TrailYamlItem> = trailblazeYaml.decodeTrail(
+        runYamlRequest.yaml,
+        deviceClassifiers = trailblazeDeviceInfo.classifiers,
+      )
+      val trailConfig = trailblazeYaml.extractTrailConfig(trailItems)
+      warnIfMemorySeedsDropped("macOS AX runner", trailConfig, runYamlRequest)
+
+      trailblazeYaml.firstSkipReason(trailItems)?.let { skipReason ->
+        Console.log(
+          "[Trailblaze] Skipping trail" +
+            (runYamlRequest.trailFilePath?.let { " ($it)" } ?: "") + ": $skipReason",
+        )
+        return@executeTrailSession session.sessionId
+      }
+
+      if (runYamlRequest.config.sendSessionStartLog) {
+        val derivedTestIdentity = runYamlRequest.trailFilePath?.let {
+          TrailRecordings.deriveTestIdentityFromTrailPath(it, fallbackClassName = "MacOsAx")
+        }
+        loggingRule.logger.log(
+          session,
+          TrailblazeLog.TrailblazeSessionStatusChangeLog(
+            sessionStatus = SessionStatus.Started(
+              trailConfig = trailConfig?.copy(memory = null),
+              trailFilePath = runYamlRequest.trailFilePath,
+              testClassName = derivedTestIdentity?.className ?: "MacOsAx",
+              testMethodName = derivedTestIdentity?.methodName ?: "run",
+              trailblazeDeviceInfo = trailblazeDeviceInfo,
+              rawYaml = runYamlRequest.yaml,
+              hasRecordedSteps = trailblazeYaml.hasRecordedSteps(trailItems),
+              trailblazeDeviceId = trailblazeDeviceId,
+            ),
+            session = session.sessionId,
+            timestamp = Clock.System.now(),
+          ),
+        )
+      }
+
+      requireActionableSteps(
+        trailblazeYaml = trailblazeYaml,
+        trailItems = trailItems,
+        trailName = trailConfig?.title ?: runYamlRequest.trailFilePath,
+        trailUrl = trailConfig?.metadata?.get("testRailUrl"),
+      )
+
+      for (item in trailItems) {
+        val itemResult = when (item) {
+          is TrailYamlItem.PromptsTrailItem ->
+            trailblazeRunnerUtil.runPromptSuspend(
+              prompts = item.promptSteps,
+              useRecordedSteps = runYamlRequest.useRecordedSteps,
+              selfHeal = runYamlRequest.config.selfHeal,
+            )
+          is TrailYamlItem.TrailheadTrailItem ->
+            trailblazeRunnerUtil.runPromptSuspend(
+              prompts = listOf(item.trailhead.toPromptStep()),
+              useRecordedSteps = true,
+              selfHeal = runYamlRequest.config.selfHeal,
+            )
+          is TrailYamlItem.ToolTrailItem ->
+            trailblazeRunnerUtil.runTrailblazeTool(item.tools.map { it.trailblazeTool })
+          is TrailYamlItem.ConfigTrailItem ->
+            item.config.context?.let { trailblazeRunner.appendToSystemPrompt(it) }
+        }
+        if (itemResult is TrailblazeToolResult.Error) {
+          throw TrailblazeException(itemResult.errorMessage)
+        }
+      }
+
+      Console.log("✅ macOS AX execution completed for '$bundleId'")
+      onProgressMessage("Test execution completed successfully")
+
+      generateAndSaveRecording(sessionId = session.sessionId, customToolClasses = toolClasses)
+
+      if (runYamlRequest.config.sendSessionEndLog) {
+        loggingRule.sessionManager.endSession(session, isSuccess = true)
+      }
+
+      session.sessionId
+    }
   }
 
   /**

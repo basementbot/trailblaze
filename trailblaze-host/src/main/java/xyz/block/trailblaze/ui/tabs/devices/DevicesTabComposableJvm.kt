@@ -210,6 +210,9 @@ private fun MobileDevicePreviewPanel(
                   is AxeConnectedDevice -> {
                     previewState = MobilePreviewState.Error("Live preview not yet supported for IOS_AXE driver")
                   }
+                  is xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice -> {
+                    previewState = MobilePreviewState.Error("Live preview not yet supported for MACOS_AX driver")
+                  }
                   null -> {
                     previewState = MobilePreviewState.Error("Device not found: ${deviceId.instanceId}")
                   }

@@ -56,6 +56,11 @@ object MatchDescriptorBuilder {
       accessibilityId = detail.uniqueId,
       resourceId = detail.uniqueId,
     )
+    is DriverNodeDetail.MacOsAx -> Identity(
+      matchedText = detail.resolveText(),
+      accessibilityId = detail.stringAttribute("AXIdentifier"),
+      resourceId = detail.stringAttribute("AXIdentifier"),
+    )
     is DriverNodeDetail.Compose -> Identity(
       matchedText = detail.resolveText(),
       accessibilityId = detail.contentDescription,

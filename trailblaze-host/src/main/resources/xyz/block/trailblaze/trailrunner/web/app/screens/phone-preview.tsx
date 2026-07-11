@@ -11,7 +11,7 @@ function PhonePreview({ trace, step, setStep, sessionId, cur, hasHierarchy, widt
   const [hierFilter, setHierFilter] = React.useState('');
   const imgRef = React.useRef(null);
   const [box, setBox] = React.useState(null); // measured rendered <img> size, so the overlay aligns to it
-  const [nat, setNat] = React.useState(null); // screenshot's natural px size = the device coordinate space bounds live in
+  const [nat, setNat] = React.useState(null); // screenshot's natural px size — fallback overlay scale when the step lacks device dims (NOTE: differs from device points on Retina)
   const n = trace.length;
   const idx = Math.max(0, trace.findIndex((t) => t.i === step));
   let file = null;
@@ -48,7 +48,12 @@ function PhonePreview({ trace, step, setStep, sessionId, cur, hasHierarchy, widt
         )}
         {overlayOn && (
           <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: box.w, height: box.h, pointerEvents: 'none', borderRadius: 4, overflow: 'hidden' }}>
-            <HierarchyOverlay tree={cur.viewHierarchy} query={hierFilter} vw={nat && nat.w} vh={nat && nat.h} />
+            {/* The hierarchy `bounds` live in the DEVICE coordinate space (logical points), which is
+                NOT the screenshot's pixel size on Retina/macOS (screenshot is 2× the points). Prefer
+                the step's reported deviceWidth/deviceHeight; fall back to the screenshot's natural px
+                only when the step didn't carry device dims (older logs). */}
+            <HierarchyOverlay tree={cur.viewHierarchy} query={hierFilter}
+              vw={(cur && cur.deviceWidth) || (nat && nat.w)} vh={(cur && cur.deviceHeight) || (nat && nat.h)} />
           </div>
         )}
       </div>
@@ -103,8 +108,9 @@ function flattenHier(root) {
 function HierarchyOverlay({ tree, query, vw, vh }) {
   const nodes = React.useMemo(() => flattenHier(tree), [tree]);
   const [hover, setHover] = React.useState(-1);
-  // Prefer the screenshot's natural px (bounds live in that same device space); fall back to the
-  // widest/tallest node bounds when the natural size hasn't loaded yet.
+  // vw/vh is the device coordinate space the bounds live in (deviceWidth/deviceHeight in logical
+  // points, passed by the caller). Fall back to the widest/tallest node bounds only when the caller
+  // couldn't supply device dims (older logs without them).
   const ext = React.useMemo(() => {
     if (vw > 0 && vh > 0) return { vw, vh };
     let mr = 0; let mb = 0;

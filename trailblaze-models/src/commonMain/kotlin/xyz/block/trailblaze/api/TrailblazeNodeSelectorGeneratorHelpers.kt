@@ -188,6 +188,27 @@ internal fun buildTargetMatch(detail: DriverNodeDetail): DriverNodeMatch? = when
       null
     }
   }
+  is DriverNodeDetail.MacOsAx -> {
+    // Prefer AXIdentifier (stable app-assigned) when present. Otherwise fall back to
+    // AXTitle/AXValue/AXDescription, carrying AXRole when we have it, all keyed by exact
+    // native AX vocabulary.
+    val id = detail.stringAttribute("AXIdentifier")
+    val title = detail.stringAttribute("AXTitle")
+    val value = detail.stringAttribute("AXValue")
+    val description = detail.stringAttribute("AXDescription")
+    val role = detail.role
+    if (id != null || title != null || value != null || description != null || role != null) {
+      DriverNodeMatch.MacOsAx(
+        identifier = id,
+        titleRegex = title?.let { escapeForSelector(it) },
+        valueRegex = if (title == null) value?.let { escapeForSelector(it) } else null,
+        descriptionRegex = if (title == null && value == null) description?.let { escapeForSelector(it) } else null,
+        roleRegex = role?.let { escapeForSelector(it) },
+      )
+    } else {
+      null
+    }
+  }
 }
 
 /**
@@ -270,6 +291,22 @@ internal fun buildStructuralMatch(detail: DriverNodeDetail): DriverNodeMatch? = 
         uniqueId = uid,
         typeRegex = type?.let { escapeForIdentifier(it) },
         roleRegex = role?.let { escapeForSelector(it) },
+      )
+    } else {
+      null
+    }
+  }
+  is DriverNodeDetail.MacOsAx -> {
+    // Structural-only match: identity + role/subrole, no content. Mirrors IosAxe's
+    // uniqueId + role shape using native AX vocabulary.
+    val id = detail.stringAttribute("AXIdentifier")
+    val role = detail.role
+    val subrole = detail.stringAttribute("AXSubrole")
+    if (id != null || role != null || subrole != null) {
+      DriverNodeMatch.MacOsAx(
+        identifier = id,
+        roleRegex = role?.let { escapeForSelector(it) },
+        subroleRegex = subrole?.let { escapeForSelector(it) },
       )
     } else {
       null

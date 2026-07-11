@@ -69,13 +69,36 @@ function extractTrace(logs: TrailblazeLogRecord[]): RawTraceRow[] {
     const err = typeof log.errorMessage === 'string' ? log.errorMessage : null;
     const screenshotFile = log.screenshotFile || null;
     const viewHierarchy = log.viewHierarchyFiltered || log.trailblazeNodeTree || log.viewHierarchy || null;
+    // The device coordinate space the hierarchy `bounds` live in (logical points), captured
+    // alongside the hierarchy so the viewer can scale overlays correctly. This is NOT the
+    // screenshot's pixel size — on Retina/macOS the screenshot is 2× these dims, so using the
+    // screenshot's natural px as the divisor squishes every overlay into the top-left quadrant.
+    const deviceWidth = log.deviceWidth || null;
+    const deviceHeight = log.deviceHeight || null;
     const ts = log.timestamp ? Date.parse(log.timestamp) : null;
+
+    // macOS AX logs a per-action TrailblazeSnapshotLog right after each recordable tool (screenshot
+    // + AX tree), with the tool's name as displayName. Fold it into the open tool group so that step
+    // shows its screenshot + view hierarchy. Terminal snapshots (captureFinal/FailureScreenshot) are
+    // NOT folded — they fall through to the trailing-cell rendering below so the run's end state
+    // shows as its own cell.
+    if (cls === 'TrailblazeSnapshotLog' &&
+      log.displayName !== 'final_screenshot' && log.displayName !== 'failure_screenshot') {
+      if (group && (!traceId || group._trace === traceId)) {
+        if (!group.screenshotFile && screenshotFile) group.screenshotFile = screenshotFile;
+        if (!group.viewHierarchy && viewHierarchy) group.viewHierarchy = viewHierarchy;
+        if (!group.deviceWidth && deviceWidth) { group.deviceWidth = deviceWidth; group.deviceHeight = deviceHeight; }
+        group._logs.push(log);
+        continue;
+      }
+    }
 
     if (toolName) {
       asserts = new Map();
       if (group && traceId && group._trace === traceId) {
         if (!group.screenshotFile && screenshotFile) group.screenshotFile = screenshotFile;
         if (!group.viewHierarchy && viewHierarchy) group.viewHierarchy = viewHierarchy;
+        if (!group.deviceWidth && deviceWidth) { group.deviceWidth = deviceWidth; group.deviceHeight = deviceHeight; }
         if (group.ok && err) { group.ok = false; group.err = err; }
         group._logs.push(log);
         continue;
@@ -83,7 +106,7 @@ function extractTrace(logs: TrailblazeLogRecord[]): RawTraceRow[] {
       closeGroup();
       const ok = log.successful !== false && !err;
       const detail = toolDetail(log);
-      group = { _trace: traceId, _logs: [log], label: toolName, tool: detail.summary, note: detail.note, ms: log.durationMs || 0, ok, err: ok ? null : (err || truncate(log.resultSummary)), screenshotFile, viewHierarchy, ts };
+      group = { _trace: traceId, _logs: [log], label: toolName, tool: detail.summary, note: detail.note, ms: log.durationMs || 0, ok, err: ok ? null : (err || truncate(log.resultSummary)), screenshotFile, viewHierarchy, deviceWidth, deviceHeight, ts };
       if (!traceId) closeGroup();
       continue;
     }
@@ -91,6 +114,7 @@ function extractTrace(logs: TrailblazeLogRecord[]): RawTraceRow[] {
     if (action && group) {
       if (!group.screenshotFile && screenshotFile) group.screenshotFile = screenshotFile;
       if (!group.viewHierarchy && viewHierarchy) group.viewHierarchy = viewHierarchy;
+      if (!group.deviceWidth && deviceWidth) { group.deviceWidth = deviceWidth; group.deviceHeight = deviceHeight; }
       if (group.ts == null) group.ts = ts;
       if (!group.tool) group.tool = describeAction(action);
       if (!group.mark) { const mk = actionMark(action, log); if (mk) group.mark = mk; }
@@ -108,15 +132,15 @@ function extractTrace(logs: TrailblazeLogRecord[]): RawTraceRow[] {
         const aok = action.succeeded !== false;
         const aerr = aok ? null : (err || `Assertion failed: ${cond}`);
         const open = asserts.get(cond);
-        if (open) { open.count++; open.ms += log.durationMs || 0; open.ok = aok; open.err = aerr; if (screenshotFile) open.screenshotFile = screenshotFile; if (viewHierarchy) open.viewHierarchy = viewHierarchy; open._logs.push(log); continue; }
-        const row = { label: actionType, _logs: [log], tool: describeAction(action), ms: log.durationMs || 0, ok: aok, err: aerr, screenshotFile, viewHierarchy, ts, count: 1, mark: actionMark(action, log) };
+        if (open) { open.count++; open.ms += log.durationMs || 0; open.ok = aok; open.err = aerr; if (screenshotFile) open.screenshotFile = screenshotFile; if (viewHierarchy) open.viewHierarchy = viewHierarchy; if (deviceWidth) { open.deviceWidth = deviceWidth; open.deviceHeight = deviceHeight; } open._logs.push(log); continue; }
+        const row = { label: actionType, _logs: [log], tool: describeAction(action), ms: log.durationMs || 0, ok: aok, err: aerr, screenshotFile, viewHierarchy, deviceWidth, deviceHeight, ts, count: 1, mark: actionMark(action, log) };
         out.push(row); asserts.set(cond, row); continue;
       }
       asserts = new Map();
       const sig = actionType + ':' + describeAction(action);
       const prev = out[out.length - 1];
-      if (prev && prev._sig === sig) { prev.count = (prev.count || 1) + 1; prev.ms += log.durationMs || 0; if (screenshotFile) prev.screenshotFile = screenshotFile; if (viewHierarchy) prev.viewHierarchy = viewHierarchy; prev._logs.push(log); continue; }
-      out.push({ _sig: sig, _logs: [log], label: actionType, tool: describeAction(action), ms: log.durationMs || 0, ok: true, err: null, screenshotFile, viewHierarchy, ts, count: 1, mark: actionMark(action, log) });
+      if (prev && prev._sig === sig) { prev.count = (prev.count || 1) + 1; prev.ms += log.durationMs || 0; if (screenshotFile) prev.screenshotFile = screenshotFile; if (viewHierarchy) prev.viewHierarchy = viewHierarchy; if (deviceWidth) { prev.deviceWidth = deviceWidth; prev.deviceHeight = deviceHeight; } prev._logs.push(log); continue; }
+      out.push({ _sig: sig, _logs: [log], label: actionType, tool: describeAction(action), ms: log.durationMs || 0, ok: true, err: null, screenshotFile, viewHierarchy, deviceWidth, deviceHeight, ts, count: 1, mark: actionMark(action, log) });
       continue;
     }
 
@@ -130,7 +154,7 @@ function extractTrace(logs: TrailblazeLogRecord[]): RawTraceRow[] {
       else if (promptText === objective && !err) continue;
       // `objective` marks the top-level trail steps (ObjectiveStartLog) so the timeline
       // can nest the tool calls / assertions that follow under their step.
-      const prow = { label: truncate(promptText, 120), _logs: [log], tool: log.modelName ? `llm · ${log.modelName}` : 'agent step', ms: log.durationMs || 0, ok: !err, err, screenshotFile, viewHierarchy, ts, objective: isObjective };
+      const prow = { label: truncate(promptText, 120), _logs: [log], tool: log.modelName ? `llm · ${log.modelName}` : 'agent step', ms: log.durationMs || 0, ok: !err, err, screenshotFile, viewHierarchy, deviceWidth, deviceHeight, ts, objective: isObjective };
       out.push(prow);
       if (isObjective) objRow = prow;
       continue;
@@ -357,6 +381,8 @@ function slimTraceForShare(trace: RawTraceRow[] | null | undefined): TraceStep[]
     ok: t.ok !== false,
     err: t.ok === false ? (t.err || null) : null,
     screenshotFile: t.screenshotFile || null,
+    deviceWidth: t.deviceWidth || null,
+    deviceHeight: t.deviceHeight || null,
     objective: !!t.objective,
     count: t.count || null,
     mark: t.mark || null,

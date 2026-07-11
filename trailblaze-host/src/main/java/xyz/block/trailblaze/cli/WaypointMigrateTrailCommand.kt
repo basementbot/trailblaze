@@ -799,6 +799,7 @@ class WaypointMigrateTrailCommand : Callable<Int> {
     is DriverNodeDetail.Compose -> text
     is DriverNodeDetail.IosMaestro -> text
     is DriverNodeDetail.IosAxe -> label
+    is DriverNodeDetail.MacOsAx -> stringAttribute("AXTitle") ?: stringAttribute("AXValue")
     is DriverNodeDetail.Web -> ariaName
   }
 

@@ -1270,6 +1270,27 @@ open class TrailCommand : Callable<Int> {
         ),
       )
     }
+    // macOS AX trails target a running app by bundle id — a "device" here is an app, not
+    // something the physical adb/xcrun scan can find. Synthesize the device summary (same shape
+    // as the COMPOSE/WEB virtual-device special-cases above); the daemon's connect flow
+    // (getConnectedMacOsAxDevice) launches/attaches to the app and builds the real device.
+    if (trailDriverType == TrailblazeDriverType.MACOS_AX) {
+      val bundleId = resolveMacOsAxBundleId(app)
+      if (bundleId == null) {
+        Console.error("Error: the macOS AX driver needs a target app bundle id.")
+        Console.error("  Pass it explicitly:   --device desktop/<bundleId>   (e.g. desktop/com.apple.calculator)")
+        Console.error("  Or set a target whose desktop app id resolves to a bundle id.")
+        return null
+      }
+      Console.info("Detected macOS AX trail — target app: $bundleId")
+      return listOf(
+        TrailblazeConnectedDeviceSummary(
+          trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+          instanceId = bundleId,
+          description = "macOS app ($bundleId)",
+        ),
+      )
+    }
     Console.info("Loading connected devices...")
     val scannedDevices = runBlocking {
       app.deviceManager.loadDevicesSuspend(applyDriverFilter = false)
@@ -1309,6 +1330,26 @@ open class TrailCommand : Callable<Int> {
     requestedDriverType = trailDriverType,
     trailPlatforms = supportedPlatformsForTrail(yamlContent),
   )
+
+  /**
+   * Resolves the macOS AX target's bundle id, in priority order:
+   *  1. The explicit `--device desktop/<bundleId>` spec.
+   *  2. The currently-selected target's desktop app id (the "target" layer that maps a friendly
+   *     target name → bundle id, same as on iOS).
+   * Returns null when neither is available.
+   */
+  private fun resolveMacOsAxBundleId(app: TrailblazeDesktopApp): String? {
+    devices.firstOrNull()?.takeIf { it.isNotBlank() }?.let { spec ->
+      val parts = spec.split("/", limit = 2)
+      val platform = TrailblazeDevicePlatform.fromString(parts[0])
+      val id = if (platform != null) parts.getOrNull(1) else spec
+      if (!id.isNullOrBlank()) return id
+    }
+    return app.deviceManager.getCurrentSelectedTargetApp()
+      ?.getPossibleAppIdsForPlatform(TrailblazeDevicePlatform.DESKTOP)
+      ?.firstOrNull()
+      ?.takeIf { it.isNotBlank() }
+  }
 
   private fun printAvailableDevices(devices: List<TrailblazeConnectedDeviceSummary>) {
     Console.error("Available devices:")

@@ -472,6 +472,21 @@ class TrailblazeMcpBridgeImpl(
       )
     }
 
+    // macOS AX devices are virtual too: the persistent-driver init above launches/attaches to the
+    // target app (getConnectedMacOsAxDevice) on demand, so a `desktop/<bundleId>` never appears in
+    // the device-state map or the available-devices list. Synthesize the summary from the device
+    // id (the bundle id), mirroring the WEB case, so the connect succeeds and the caller can read
+    // screen state via the persistent MacOsAxConnectedDevice.
+    if (trailblazeDeviceId.trailblazeDevicePlatform == TrailblazeDevicePlatform.DESKTOP &&
+      configuredDriverType == TrailblazeDriverType.MACOS_AX
+    ) {
+      return TrailblazeConnectedDeviceSummary(
+        trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+        instanceId = trailblazeDeviceId.instanceId,
+        description = "macOS app (${trailblazeDeviceId.instanceId})",
+      )
+    }
+
     error("Device $trailblazeDeviceId is not available.")
   }
 
@@ -998,6 +1013,14 @@ class TrailblazeMcpBridgeImpl(
             AxeScreenState(udid = device.udid, deviceWidth = device.deviceWidth, deviceHeight = device.deviceHeight)
           }
         }
+        is xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice -> {
+          return { _ ->
+            xyz.block.trailblaze.host.screenstate.MacOsAxScreenState(
+              pid = device.pid, deviceWidth = device.deviceWidth, deviceHeight = device.deviceHeight,
+              wholeScreen = device.wholeScreen,
+            )
+          }
+        }
       }
     }
 
@@ -1024,6 +1047,13 @@ class TrailblazeMcpBridgeImpl(
             is AxeConnectedDevice -> {
               return { _ ->
                 AxeScreenState(udid = device.udid, deviceWidth = device.deviceWidth, deviceHeight = device.deviceHeight)
+              }
+            }
+            is xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice -> {
+              return { _ ->
+                xyz.block.trailblaze.host.screenstate.MacOsAxScreenState(
+                  pid = device.pid, deviceWidth = device.deviceWidth, deviceHeight = device.deviceHeight,
+                )
               }
             }
           }
@@ -1345,6 +1375,15 @@ class TrailblazeMcpBridgeImpl(
       return result
     }
 
+    // MACOS_AX driver: convert Maestro commands → MacOsAxActions → dispatch via the Apple
+    // Accessibility APIs. Same shape as the IOS_AXE branch above (see docs/devlog/
+    // 2026-07-10-macos-ax-driver.md).
+    if (trailblazeDeviceManager.getDeviceState(trailblazeDeviceId)?.device?.trailblazeDriverType == TrailblazeDriverType.MACOS_AX) {
+      val result = executeToolViaMacOsAx(tool, trailblazeDeviceId)
+      cachedScreenStates.remove(trailblazeDeviceId.instanceId)
+      return result
+    }
+
     // For on-device drivers, send the YAML directly via RPC and wait for completion.
     // The standard runYaml() path is fire-and-forget (launches a coroutine and returns
     // as soon as the session is created), so tool actions like taps return "executed"
@@ -1492,6 +1531,70 @@ class TrailblazeMcpBridgeImpl(
 
   private fun axeSession(): TrailblazeSession =
     TrailblazeSession(sessionId = SessionId("axe"), startTime = Clock.System.now())
+
+  /**
+   * Routes an MCP tool call for a MACOS_AX-configured device to
+   * [xyz.block.trailblaze.host.macosax.MacOsAxTrailblazeAgent.runTool]. Desktop parallel of
+   * [executeToolViaAxe]; the context carries a fresh [MacOsAxScreenState] so tree-reading tools
+   * (e.g. `tap ref=…`) can find their target. Same POC session-logging gap as the AXe path.
+   */
+  private suspend fun executeToolViaMacOsAx(tool: TrailblazeTool, trailblazeDeviceId: TrailblazeDeviceId): String {
+    val device = persistentDevices[trailblazeDeviceId.instanceId]
+      as? xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice
+      ?: error(
+        "MACOS_AX execution requires a MacOsAxConnectedDevice in the persistent registry; got " +
+          "${persistentDevices[trailblazeDeviceId.instanceId]?.let { it::class.simpleName }}",
+      )
+    val deviceManager = xyz.block.trailblaze.host.macosax.MacOsAxDeviceManager(
+      pid = device.pid,
+      deviceWidth = device.deviceWidth,
+      deviceHeight = device.deviceHeight,
+    )
+    val agent = xyz.block.trailblaze.host.macosax.MacOsAxTrailblazeAgent(
+      deviceManager = deviceManager,
+      trailblazeLogger = noOpTrailblazeLogger(),
+      trailblazeDeviceInfoProvider = { macOsAxDeviceInfo(device) },
+      sessionProvider = { macOsAxSession() },
+    )
+    val screenState = xyz.block.trailblaze.host.screenstate.MacOsAxScreenState(
+      pid = device.pid, deviceWidth = device.deviceWidth, deviceHeight = device.deviceHeight,
+    )
+    Console.log("[MACOS_AX] Executing ${tool::class.simpleName} on ${device.bundleId} (pid=${device.pid})")
+    val ctx = TrailblazeToolExecutionContext(
+      screenState = screenState,
+      traceId = xyz.block.trailblaze.logs.model.TraceId.generate(
+        origin = xyz.block.trailblaze.logs.model.TraceId.Companion.TraceOrigin.MCP,
+      ),
+      trailblazeDeviceInfo = macOsAxDeviceInfo(device),
+      sessionProvider = { macOsAxSession() },
+      screenStateProvider = { deviceManager.getScreenState() },
+      androidDeviceCommandExecutor = null,
+      trailblazeLogger = noOpTrailblazeLogger(),
+      memory = AgentMemory(),
+      maestroTrailblazeAgent = agent,
+      nodeSelectorMode = agent.nodeSelectorMode,
+    )
+    return when (val result = agent.runTool(tool, ctx)) {
+      is TrailblazeToolResult.Success -> renderToolResultOutput(
+        message = result.message,
+        structuredContent = result.structuredContent,
+        fallback = "Executed ${tool::class.simpleName} via MACOS_AX on ${device.bundleId}",
+      )
+      is TrailblazeToolResult.Error -> error("MACOS_AX tool execution failed: ${result.errorMessage}")
+    }
+  }
+
+  private fun macOsAxDeviceInfo(
+    device: xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice,
+  ): TrailblazeDeviceInfo = TrailblazeDeviceInfo(
+    trailblazeDeviceId = device.trailblazeDeviceId,
+    trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+    widthPixels = device.deviceWidth,
+    heightPixels = device.deviceHeight,
+  )
+
+  private fun macOsAxSession(): TrailblazeSession =
+    TrailblazeSession(sessionId = SessionId("macos-ax"), startTime = Clock.System.now())
 
   private fun noOpTrailblazeLogger(): TrailblazeLogger =
     TrailblazeLogger(logEmitter = NoOpLogEmitter, screenStateLogger = ScreenStateLogger { "" })
@@ -2175,11 +2278,17 @@ class TrailblazeMcpBridgeImpl(
 
       // Verify the device is available. WEB instances are virtual — any instance ID
       // is valid because the bridge provisions a Playwright browser on demand for IDs
-      // it hasn't seen yet (e.g. `--device web/foo` from the CLI). Mobile/desktop
-      // device IDs must already be in the discovered list.
+      // it hasn't seen yet (e.g. `--device web/foo` from the CLI). macOS AX devices are
+      // virtual in the same way: `--device desktop/<bundleId>` names a running/launchable
+      // app that the connect flow (getConnectedMacOsAxDevice) attaches to on demand, so it
+      // won't be in the discovered list either. Mobile / Compose-desktop device IDs must
+      // already be in the discovered list.
+      val isVirtualMacOsAx = requestedDeviceId.trailblazeDevicePlatform == TrailblazeDevicePlatform.DESKTOP &&
+        getConfiguredDriverType(TrailblazeDevicePlatform.DESKTOP) == TrailblazeDriverType.MACOS_AX
       val isAvailable = trailblazeDeviceManager.getDeviceState(requestedDeviceId) != null
           || getAvailableDevices().any { it.trailblazeDeviceId == requestedDeviceId }
           || requestedDeviceId.trailblazeDevicePlatform == TrailblazeDevicePlatform.WEB
+          || isVirtualMacOsAx
 
       if (!isAvailable) {
         error("Device $requestedDeviceId is not available.")

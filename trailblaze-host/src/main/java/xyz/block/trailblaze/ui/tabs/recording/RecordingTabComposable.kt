@@ -104,7 +104,9 @@ fun RecordingTabComposable(
       .filter {
         it.trailblazeDriverType != TrailblazeDriverType.REVYL_ANDROID &&
           it.trailblazeDriverType != TrailblazeDriverType.REVYL_IOS &&
-          !it.platform.hidden
+          // DESKTOP is `hidden` for the Compose self-driver, but MACOS_AX rides on DESKTOP and is
+          // user-facing — always keep it. Compose stays hidden.
+          (!it.platform.hidden || it.trailblazeDriverType == TrailblazeDriverType.MACOS_AX)
       }
     val seen = filtered.map { it.instanceId to it.platform }.toMutableSet()
     val withRunningBrowsers = filtered + deviceManager.webBrowserManager.getAllRunningBrowserSummaries()

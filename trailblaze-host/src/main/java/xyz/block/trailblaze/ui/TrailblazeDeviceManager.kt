@@ -739,8 +739,22 @@ class TrailblazeDeviceManager(
           )
         }
       }
+      TrailblazeDriverType.MACOS_AX -> {
+        val macDevice = deviceState.device as? xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice
+        if (macDevice == null) {
+          Console.log("⚠️ MACOS_AX driver type but connected device is not MacOsAxConnectedDevice")
+          null
+        } else {
+          xyz.block.trailblaze.host.screenstate.MacOsAxScreenState(
+            pid = macDevice.pid,
+            deviceWidth = macDevice.deviceWidth,
+            deviceHeight = macDevice.deviceHeight,
+            wholeScreen = macDevice.wholeScreen,
+          )
+        }
+      }
       TrailblazeDriverType.COMPOSE -> {
-        // Not currently supported for direct screen capture
+        // Not currently supported for direct screen capture.
         Console.log("⚠️ Screen state capture not supported for ${driverType.name} driver")
         null
       }
@@ -958,6 +972,26 @@ class TrailblazeDeviceManager(
               trailblazeDriverType = TrailblazeDriverType.PLAYWRIGHT_NATIVE,
               instanceId = PLAYWRIGHT_NATIVE_INSTANCE_ID,
               description = "Playwright Browser (Native)",
+            )
+          )
+        }
+
+        // macOS desktop AX — a virtual "whole desktop" device (every on-screen app stitched, like
+        // the iOS/Android/Web drivers' whole-screen hierarchy). Shown only when the driver is
+        // actually usable on this host: running on macOS, Accessibility-trusted, and the screen
+        // unlocked (macOS blocks AX window access while locked). Bundle-id targets
+        // (`desktop/<bundleId>`) stay connectable directly via --device even though they aren't
+        // enumerated here (there's no fixed set of apps to list).
+        val isMacHost = System.getProperty("os.name").orEmpty().startsWith("Mac")
+        if (isMacHost &&
+          runCatching { xyz.block.trailblaze.host.macosax.MacOsAxNative.isProcessTrusted() }.getOrDefault(false) &&
+          !xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.isScreenLocked()
+        ) {
+          add(
+            TrailblazeConnectedDeviceSummary(
+              trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+              instanceId = xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID,
+              description = "macOS Desktop (all windows)",
             )
           )
         }

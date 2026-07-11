@@ -199,6 +199,7 @@ internal object TrailblazeNodeSelectorMinimizer {
     is DriverNodeMatch.Compose -> minimizeCompose(match, stillUnique)
     is DriverNodeMatch.IosMaestro -> minimizeIosMaestro(match, stillUnique)
     is DriverNodeMatch.IosAxe -> minimizeIosAxe(match, stillUnique)
+    is DriverNodeMatch.MacOsAx -> minimizeMacOsAx(match, stillUnique)
   }
 
   /**
@@ -347,6 +348,28 @@ internal object TrailblazeNodeSelectorMinimizer {
     return greedilyApply(match, drops, stillUnique)
   }
 
+  private fun minimizeMacOsAx(
+    match: DriverNodeMatch.MacOsAx,
+    stillUnique: (DriverNodeMatch) -> Boolean,
+  ): DriverNodeMatch.MacOsAx {
+    // Least-stable → most-stable: transient action, then role/subrole/roleDescription
+    // (implementation-ish type info), then content text, then arbitrary exact attributes,
+    // finally the app-assigned AXIdentifier (most stable, dropped last).
+    val drops: List<(DriverNodeMatch.MacOsAx) -> DriverNodeMatch.MacOsAx> = listOf(
+      { it.copy(action = null) },
+      { it.copy(subroleRegex = null) },
+      { it.copy(roleDescriptionRegex = null) },
+      { it.copy(roleRegex = null) },
+      { it.copy(helpRegex = null) },
+      { it.copy(descriptionRegex = null) },
+      { it.copy(valueRegex = null) },
+      { it.copy(titleRegex = null) },
+      { it.copy(attributeEquals = null) },
+      { it.copy(identifier = null) },
+    )
+    return greedilyApply(match, drops, stillUnique)
+  }
+
   /**
    * Threads a [match] through each transform in [drops], committing every drop
    * that keeps [stillUnique] true. Equality short-circuits a no-op drop so we
@@ -445,6 +468,17 @@ internal object TrailblazeNodeSelectorMinimizer {
         { m -> unescapeForSelector(m.labelRegex)?.let { m.copy(labelRegex = it) } ?: m },
         { m -> unescapeForSelector(m.valueRegex)?.let { m.copy(valueRegex = it) } ?: m },
         { m -> unescapeForSelector(m.titleRegex)?.let { m.copy(titleRegex = it) } ?: m },
+      ),
+      stillUnique,
+    )
+    is DriverNodeMatch.MacOsAx -> greedilyApply(
+      match,
+      listOf(
+        { m -> unescapeForSelector(m.titleRegex)?.let { m.copy(titleRegex = it) } ?: m },
+        { m -> unescapeForSelector(m.valueRegex)?.let { m.copy(valueRegex = it) } ?: m },
+        { m -> unescapeForSelector(m.descriptionRegex)?.let { m.copy(descriptionRegex = it) } ?: m },
+        { m -> unescapeForSelector(m.helpRegex)?.let { m.copy(helpRegex = it) } ?: m },
+        { m -> unescapeForSelector(m.roleDescriptionRegex)?.let { m.copy(roleDescriptionRegex = it) } ?: m },
       ),
       stillUnique,
     )
@@ -713,4 +747,9 @@ internal fun DriverNodeMatch.isEmpty(): Boolean = when (this) {
     roleRegex == null && subroleRegex == null && labelRegex == null && valueRegex == null &&
       uniqueId == null && typeRegex == null && titleRegex == null && customAction == null &&
       enabled == null
+  is DriverNodeMatch.MacOsAx ->
+    roleRegex == null && subroleRegex == null && roleDescriptionRegex == null &&
+      titleRegex == null && valueRegex == null && descriptionRegex == null &&
+      helpRegex == null && identifier == null && action == null &&
+      attributeEquals.isNullOrEmpty()
 }

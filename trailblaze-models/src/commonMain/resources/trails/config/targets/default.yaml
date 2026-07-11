@@ -31,3 +31,8 @@ platforms:
       - compose_core
       - compose_verification
       - memory
+
+  macos-ax:
+    tool_sets:
+      - macos_core
+      - memory

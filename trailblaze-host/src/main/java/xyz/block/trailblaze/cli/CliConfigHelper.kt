@@ -154,6 +154,23 @@ val CONFIG_KEYS: Map<String, ConfigKey> = listOf(
     },
   ),
   ConfigKey(
+    name = "desktop-driver",
+    description = "macOS desktop driver type",
+    validValues = TrailblazeDriverType.selectableForPlatform(TrailblazeDevicePlatform.DESKTOP)
+      .joinToString(", ") { it.cliShortName!! },
+    get = { config ->
+      (config.selectedTrailblazeDriverTypes[TrailblazeDevicePlatform.DESKTOP] ?: "not set").toString()
+    },
+    set = { config, value ->
+      CliConfigHelper.parseDesktopDriver(value)?.let { driverType ->
+        config.copy(
+          selectedTrailblazeDriverTypes = config.selectedTrailblazeDriverTypes +
+            (TrailblazeDevicePlatform.DESKTOP to driverType)
+        )
+      }
+    },
+  ),
+  ConfigKey(
     name = "self-heal",
     description = "Enable/disable self-heal (AI takes over) when recorded steps fail",
     validValues = "true, false",
@@ -569,6 +586,9 @@ object CliConfigHelper {
 
   fun parseIosDriver(driver: String): TrailblazeDriverType? =
     parseDriver(TrailblazeDevicePlatform.IOS, driver)
+
+  fun parseDesktopDriver(driver: String): TrailblazeDriverType? =
+    parseDriver(TrailblazeDevicePlatform.DESKTOP, driver)
   
   /**
    * Parse agent implementation string.

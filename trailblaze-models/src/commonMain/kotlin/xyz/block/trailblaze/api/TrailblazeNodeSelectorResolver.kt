@@ -213,6 +213,8 @@ object TrailblazeNodeSelectorResolver {
       detail is DriverNodeDetail.IosMaestro && matchesIosMaestro(detail, match)
     is DriverNodeMatch.IosAxe ->
       detail is DriverNodeDetail.IosAxe && matchesIosAxe(detail, match)
+    is DriverNodeMatch.MacOsAx ->
+      detail is DriverNodeDetail.MacOsAx && matchesMacOsAx(detail, match)
   }
 
   private fun matchesAndroidAccessibility(
@@ -333,6 +335,30 @@ object TrailblazeNodeSelectorResolver {
       if (needed !in detail.customActions) return false
     }
     if (!requireEqual(match.enabled, detail.enabled)) return false
+    return true
+  }
+
+  private fun matchesMacOsAx(
+    detail: DriverNodeDetail.MacOsAx,
+    match: DriverNodeMatch.MacOsAx,
+  ): Boolean {
+    if (!requirePattern(match.roleRegex, detail.stringAttribute("AXRole"))) return false
+    if (!requirePattern(match.subroleRegex, detail.stringAttribute("AXSubrole"))) return false
+    if (!requirePattern(match.roleDescriptionRegex, detail.stringAttribute("AXRoleDescription"))) return false
+    if (!requirePattern(match.titleRegex, detail.stringAttribute("AXTitle"))) return false
+    if (!requirePattern(match.valueRegex, detail.stringAttribute("AXValue"))) return false
+    if (!requirePattern(match.descriptionRegex, detail.stringAttribute("AXDescription"))) return false
+    if (!requirePattern(match.helpRegex, detail.stringAttribute("AXHelp"))) return false
+    if (!requireEqual(match.identifier, detail.stringAttribute("AXIdentifier"))) return false
+    match.action?.let { needed ->
+      if (needed !in detail.actions) return false
+    }
+    match.attributeEquals?.let { predicates ->
+      // Exact-match any AX* attribute string payload — the full-fidelity escape hatch.
+      for ((key, expected) in predicates) {
+        if (detail.stringAttribute(key) != expected) return false
+      }
+    }
     return true
   }
 

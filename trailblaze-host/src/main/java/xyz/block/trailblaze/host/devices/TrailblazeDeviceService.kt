@@ -108,6 +108,54 @@ object TrailblazeDeviceService {
     )
   }
 
+  /**
+   * Gets a connected macOS desktop app via the Apple Accessibility (AX) driver. The
+   * [TrailblazeDeviceId.instanceId] is the target app's **bundle id** (e.g.
+   * `com.apple.calculator`) — the macOS analog of the iOS bundle id. Launches the app if it
+   * isn't already running, resolves its live pid, and reads the main-display size for bounds.
+   */
+  fun getConnectedMacOsAxDevice(trailblazeDeviceId: TrailblazeDeviceId): TrailblazeConnectedDevice? {
+    if (!xyz.block.trailblaze.host.macosax.MacOsAxNative.isProcessTrusted()) {
+      System.err.println(
+        "[MACOS_AX] this process is not Accessibility-trusted. Grant it in System Settings → " +
+          "Privacy & Security → Accessibility, then retry.",
+      )
+      return null
+    }
+    if (xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.isScreenLocked()) {
+      System.err.println(
+        "[MACOS_AX] the Mac's screen is locked — macOS blocks Accessibility access to app windows " +
+          "while locked. Unlock the screen and retry.",
+      )
+      return null
+    }
+    val bundleId = trailblazeDeviceId.instanceId
+    val display = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.mainDisplaySize()
+
+    // Whole-desktop device (`desktop/all`): capture every on-screen app; nothing to launch.
+    if (bundleId == MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID) {
+      return MacOsAxConnectedDevice(
+        bundleId = bundleId,
+        pid = 0,
+        deviceWidth = display.width,
+        deviceHeight = display.height,
+      )
+    }
+
+    // Single-app device (`desktop/<bundleId>`): launch/attach to the app.
+    val pid = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.ensureRunning(bundleId)
+    if (pid == null) {
+      System.err.println("[MACOS_AX] could not launch/resolve a running pid for bundle id '$bundleId'")
+      return null
+    }
+    return MacOsAxConnectedDevice(
+      bundleId = bundleId,
+      pid = pid,
+      deviceWidth = display.width,
+      deviceHeight = display.height,
+    )
+  }
+
   fun listConnectedTrailblazeDevices(): Set<TrailblazeDeviceId> {
     return cachedConnectedDevices.map {
       TrailblazeDeviceId(
@@ -143,9 +191,13 @@ object TrailblazeDeviceService {
       "Web tests use PLAYWRIGHT_NATIVE path (BasePlaywrightNativeTest), not TrailblazeDeviceService"
     )
 
-    // Compose desktop driver communicates via ComposeRpcClient, not via the
-    // Maestro/host-driver fan-out below; same shape as ANDROID (null = no Maestro
-    // device backing this CLI invocation, the RPC path takes over).
-    TrailblazeDevicePlatform.DESKTOP -> null
+    // DESKTOP carries two driver types (mirrors IOS's IOS_HOST/IOS_AXE split):
+    //  - MACOS_AX drives a running macOS app via the Apple Accessibility APIs (bundle-id target).
+    //  - COMPOSE communicates via ComposeRpcClient, not this Maestro/host-driver fan-out; null =
+    //    no Maestro device backing this CLI invocation, the RPC path takes over (same as ANDROID).
+    TrailblazeDevicePlatform.DESKTOP -> when (driverType) {
+      TrailblazeDriverType.MACOS_AX -> getConnectedMacOsAxDevice(trailblazeDeviceId)
+      else -> null
+    }
   }
 }

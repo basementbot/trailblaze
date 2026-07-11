@@ -54,6 +54,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import xyz.block.trailblaze.api.DriverNodeDetail
+import xyz.block.trailblaze.api.MacOsAxAttributeValue
 import xyz.block.trailblaze.api.TrailblazeNode
 import androidx.compose.foundation.text.selection.SelectionContainer
 import xyz.block.trailblaze.ui.composables.SelectableText
@@ -311,6 +312,7 @@ private fun TrailblazeNodeTreeItem(
         is DriverNodeDetail.AndroidMaestro -> "android"
         is DriverNodeDetail.IosMaestro -> "ios"
         is DriverNodeDetail.IosAxe -> "ios-axe"
+        is DriverNodeDetail.MacOsAx -> "macos-ax"
         is DriverNodeDetail.Web -> "web"
         is DriverNodeDetail.Compose -> "compose"
       }
@@ -394,6 +396,15 @@ private fun resolveDisplayText(node: TrailblazeNode): String {
         !detail.value.isNullOrBlank() -> "[${detail.value}]"
         !detail.uniqueId.isNullOrBlank() -> "#${detail.uniqueId}"
         !detail.type.isNullOrBlank() -> "<${detail.type}>"
+        else -> "(empty)"
+      }
+    }
+    is DriverNodeDetail.MacOsAx -> {
+      when {
+        detail.stringAttribute("AXTitle") != null -> "\"${detail.stringAttribute("AXTitle")}\""
+        detail.stringAttribute("AXValue") != null -> "[${detail.stringAttribute("AXValue")}]"
+        detail.stringAttribute("AXIdentifier") != null -> "#${detail.stringAttribute("AXIdentifier")}"
+        detail.role != null -> "<${detail.role}>"
         else -> "(empty)"
       }
     }
@@ -496,6 +507,7 @@ internal fun TrailblazeNodeDetailsPanel(
           is DriverNodeDetail.AndroidMaestro -> "Android Properties"
           is DriverNodeDetail.IosMaestro -> "iOS Properties"
           is DriverNodeDetail.IosAxe -> "iOS AXe Properties"
+          is DriverNodeDetail.MacOsAx -> "macOS AX Properties"
           is DriverNodeDetail.Web -> "Web Properties"
           is DriverNodeDetail.Compose -> "Compose Properties"
         }
@@ -756,7 +768,47 @@ private fun DriverNodeDetailProperties(
     is DriverNodeDetail.Compose -> ComposeProperties(detail, fontScale)
     is DriverNodeDetail.IosMaestro -> IosMaestroProperties(detail, fontScale)
     is DriverNodeDetail.IosAxe -> IosAxeProperties(detail, fontScale)
+    is DriverNodeDetail.MacOsAx -> MacOsAxProperties(detail, fontScale)
   }
+}
+
+@Composable
+private fun MacOsAxProperties(
+  detail: DriverNodeDetail.MacOsAx,
+  fontScale: Float,
+) {
+  // Full-fidelity dump: PID, then every native AX attribute verbatim (exact AX* key →
+  // rendered value), then actions and parameterized attribute names. No trimming — the whole
+  // point of this driver is to surface 100% of what macOS reports (see DriverNodeDetail.MacOsAx).
+  TrailblazeDetailRow(label = "PID", value = detail.pid.toString(), fontScale = fontScale)
+  detail.attributes.entries.sortedBy { it.key }.forEach { (key, value) ->
+    TrailblazeDetailRow(label = key, value = renderMacOsAxValue(value), fontScale = fontScale)
+  }
+  if (detail.actions.isNotEmpty()) {
+    TrailblazeDetailRow(label = "Actions", value = detail.actions.joinToString(", "), fontScale = fontScale)
+  }
+  if (detail.parameterizedAttributeNames.isNotEmpty()) {
+    TrailblazeDetailRow(
+      label = "Parameterized Attributes",
+      value = detail.parameterizedAttributeNames.joinToString(", "),
+      fontScale = fontScale,
+    )
+  }
+}
+
+private fun renderMacOsAxValue(value: MacOsAxAttributeValue): String = when (value) {
+  is MacOsAxAttributeValue.Str -> value.value
+  is MacOsAxAttributeValue.Num -> value.value.toString()
+  is MacOsAxAttributeValue.Bool -> value.value.toString()
+  is MacOsAxAttributeValue.Arr -> "[${value.values.joinToString(", ") { renderMacOsAxValue(it) }}]"
+  is MacOsAxAttributeValue.Point -> "Point(x=${value.x}, y=${value.y})"
+  is MacOsAxAttributeValue.Size -> "Size(width=${value.width}, height=${value.height})"
+  is MacOsAxAttributeValue.Rect ->
+    "Rect(origin=(${value.origin.x}, ${value.origin.y}), size=(${value.size.width}, ${value.size.height}))"
+  is MacOsAxAttributeValue.Range -> "Range(location=${value.location}, length=${value.length})"
+  is MacOsAxAttributeValue.ElementRef ->
+    "→ AXUIElement(role=${value.role}, id=${value.identifier}, title=${value.title})"
+  is MacOsAxAttributeValue.Unknown -> "<unknown CFType ${value.cfTypeId}>"
 }
 
 @Composable

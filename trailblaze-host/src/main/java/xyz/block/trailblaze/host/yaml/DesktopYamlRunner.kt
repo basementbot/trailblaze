@@ -128,6 +128,24 @@ class DesktopYamlRunner(
   }
 
   /**
+   * Synthesizes the virtual macOS-AX device summary for a run that targets it. There's no
+   * physical device scan for a desktop app — the "device" is the target bundle id, which is the
+   * [TrailblazeDeviceId.instanceId]. Returns null for any run that isn't a DESKTOP/MACOS_AX target.
+   */
+  private fun synthesizeMacOsAxDevice(
+    trailblazeDeviceId: TrailblazeDeviceId,
+    runYamlRequest: RunYamlRequest,
+  ): TrailblazeConnectedDeviceSummary? {
+    if (trailblazeDeviceId.trailblazeDevicePlatform != TrailblazeDevicePlatform.DESKTOP) return null
+    if (runYamlRequest.driverType != TrailblazeDriverType.MACOS_AX) return null
+    return TrailblazeConnectedDeviceSummary(
+      trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+      instanceId = trailblazeDeviceId.instanceId,
+      description = "macOS app (${trailblazeDeviceId.instanceId})",
+    )
+  }
+
+  /**
    * Shortens device description by removing UUID identifiers.
    * Example: "iPhone 16 Pro - iOS 18.4 - 55B5483E-EE63-4605-91DE-B061F19B9D1E" -> "iPhone 16 Pro - iOS 18.4"
    */
@@ -188,6 +206,11 @@ class DesktopYamlRunner(
       val connectedTrailblazeDevice = trailblazeDeviceManager.getDeviceState(trailblazeDeviceId)?.device
         ?: trailblazeDeviceManager.loadDevicesSuspend(applyDriverFilter = true).firstOrNull { it.trailblazeDeviceId == trailblazeDeviceId }
         ?: trailblazeDeviceManager.loadDevicesSuspend(applyDriverFilter = false).firstOrNull { it.trailblazeDeviceId == trailblazeDeviceId }
+        // macOS AX "devices" are a running app identified by bundle id, not something the physical
+        // device scan can enumerate — synthesize it from the request when this run targets it (the
+        // bundle id is the deviceId's instanceId). Mirrors the virtual-device treatment web/compose
+        // get in the CLI's pre-flight loadConnectedDevices.
+        ?: synthesizeMacOsAxDevice(trailblazeDeviceId, runYamlRequest)
 
       if (connectedTrailblazeDevice == null) {
         onProgressMessage("Device with ID $trailblazeDeviceId not found")

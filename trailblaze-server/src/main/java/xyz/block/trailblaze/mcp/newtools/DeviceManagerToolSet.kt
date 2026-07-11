@@ -339,19 +339,39 @@ class DeviceManagerToolSet(
         }
       }
 
-      DeviceAction.DESKTOP -> {
+      DeviceAction.DESKTOP -> when (mcpBridge.getConfiguredDriverType(TrailblazeDevicePlatform.DESKTOP)) {
+        // macOS AX driver: the "device" is a running app identified by its bundle id (the
+        // deviceId, e.g. `desktop/com.apple.calculator`). Unlike Compose there's nothing to
+        // discover via loadDevicesSuspend — the connect flow (getConnectedMacOsAxDevice) launches
+        // or attaches to the app on demand. Route straight through connectToDeviceUnified, the
+        // same shape the WEB action uses for its virtual instances.
+        TrailblazeDriverType.MACOS_AX -> {
+          val bundleId = deviceId?.takeIf { it.isNotBlank() }
+            ?: return "Error: the macOS AX driver needs a target app bundle id — pass " +
+              "`--device desktop/<bundleId>` (e.g. `desktop/com.apple.calculator`)."
+          connectToDeviceUnified(
+            TrailblazeDeviceId(
+              instanceId = bundleId,
+              trailblazeDevicePlatform = TrailblazeDevicePlatform.DESKTOP,
+            ),
+            testName,
+          )
+        }
+
         // Compose desktop has exactly one logical instance ("self") — the running
         // Trailblaze desktop window's own UI. The device summary is published by
         // `TrailblazeDeviceManager.loadDevicesSuspend` only when the in-process
         // ComposeRpcServer is responding, so finding the device here doubles as
         // a reachability check.
-        val desktopDevice = mcpBridge.getAvailableDevices()
-          .find { it.platform == TrailblazeDevicePlatform.DESKTOP }
-          ?: return "Error: No Compose desktop driver available. " +
-            "Is the Trailblaze desktop app running with self-test server enabled? " +
-            "Start it with `trailblaze app`."
+        else -> {
+          val desktopDevice = mcpBridge.getAvailableDevices()
+            .find { it.platform == TrailblazeDevicePlatform.DESKTOP }
+            ?: return "Error: No Compose desktop driver available. " +
+              "Is the Trailblaze desktop app running with self-test server enabled? " +
+              "Start it with `trailblaze app`."
 
-        connectToDeviceUnified(desktopDevice.trailblazeDeviceId, testName)
+          connectToDeviceUnified(desktopDevice.trailblazeDeviceId, testName)
+        }
       }
     }
   }

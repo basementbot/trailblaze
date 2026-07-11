@@ -36,7 +36,12 @@ class GetConnectedDevicesHandler(
       .filter {
         it.trailblazeDriverType != TrailblazeDriverType.REVYL_ANDROID &&
           it.trailblazeDriverType != TrailblazeDriverType.REVYL_IOS &&
-          !it.platform.hidden
+          // DESKTOP is a `hidden` platform because it originally only carried the Compose
+          // desktop self-driver (never user-facing). It now ALSO carries the user-facing macOS
+          // Accessibility driver, so exempt MACOS_AX from the hidden-platform filter — otherwise
+          // the discovered `MACOS_AX/all` device is dropped here and never reaches the web device
+          // viewer / `device list`, even though loadDevices found it. Compose stays hidden.
+          (!it.platform.hidden || it.trailblazeDriverType == TrailblazeDriverType.MACOS_AX)
       }
 
     val seen = filtered.map { it.instanceId to it.platform }.toMutableSet()

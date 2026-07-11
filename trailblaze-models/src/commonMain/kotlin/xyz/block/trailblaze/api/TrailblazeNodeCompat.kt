@@ -114,5 +114,18 @@ fun TrailblazeNode.toViewHierarchyTreeNode(): ViewHierarchyTreeNode {
       enabled = detail.enabled,
       children = children.map { it.toViewHierarchyTreeNode() },
     )
+    is DriverNodeDetail.MacOsAx -> ViewHierarchyTreeNode(
+      nodeId = nodeId,
+      x1 = b?.left ?: 0,
+      y1 = b?.top ?: 0,
+      x2 = b?.right ?: 0,
+      y2 = b?.bottom ?: 0,
+      className = detail.role,
+      resourceId = detail.stringAttribute("AXIdentifier"),
+      text = detail.stringAttribute("AXTitle"),
+      accessibilityText = detail.stringAttribute("AXValue") ?: detail.stringAttribute("AXDescription"),
+      enabled = (detail.attributes["AXEnabled"] as? MacOsAxAttributeValue.Bool)?.value ?: true,
+      children = children.map { it.toViewHierarchyTreeNode() },
+    )
   }
 }

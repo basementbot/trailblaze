@@ -419,6 +419,10 @@ const GENERAL_TRAILMAPS_BY_PLATFORM = {
   android: ['trailblaze', 'mobile', 'android', 'compose'],
   ios: ['trailblaze', 'mobile'],
   web: ['trailblaze', 'web'],
+  // Desktop covers both desktop drivers: the macOS Accessibility driver (`macos` trailmap) and the
+  // Compose desktop driver (`compose`). Without this entry the tool palette fell back to the mobile/
+  // web list and filtered out every `macos_*` tool.
+  desktop: ['trailblaze', 'macos', 'compose'],
 };
 function scopeTrailmaps(target, platform) {
   const plat = (platform || '').toLowerCase();

@@ -172,6 +172,8 @@ fun TrailblazeNode.describe(): String {
       detail.resolveText() to detail.className
     is DriverNodeDetail.IosAxe ->
       detail.resolveText() to detail.type
+    is DriverNodeDetail.MacOsAx ->
+      detail.resolveText() to detail.role
     is DriverNodeDetail.Compose ->
       detail.resolveText() to detail.role
     is DriverNodeDetail.Web ->

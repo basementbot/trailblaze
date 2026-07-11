@@ -1,0 +1,14 @@
+# Library trailmap that owns the macOS desktop Accessibility (AX) driver tools. Like the Compose
+# desktop trailmap, it has no `target:` block — its sole job is to scope the `macos_*` tools and
+# publish `macos_core` as a per-driver default so any target (including the built-in Default) that
+# dispatches against the `macos-ax` driver inherits them. The tools drive already-running macOS
+# apps via Apple's Accessibility APIs (AXUIElement) rather than a mobile device or browser.
+#
+# Naming convention: trailmap id is `macos`, matching the `macos_*` prefix on every tool + toolset.
+# The `platforms:` key is the driver key `macos-ax` (mirrors the Compose trailmap keying its block
+# by the `compose` driver), so the toolset wires to the MACOS_AX driver specifically.
+id: macos
+platforms:
+  macos-ax:
+    tool_sets:
+      - macos_core

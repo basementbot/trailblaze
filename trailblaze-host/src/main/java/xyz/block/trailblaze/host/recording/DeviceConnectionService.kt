@@ -54,10 +54,15 @@ class DeviceConnectionService(private val deviceManager: TrailblazeDeviceManager
       TrailblazeDevicePlatform.WEB -> connectWeb(device)
       TrailblazeDevicePlatform.ANDROID -> connectAndroid(device)
       TrailblazeDevicePlatform.IOS -> connectIos(device)
-      TrailblazeDevicePlatform.DESKTOP -> ConnectionState.Error(
-        "Recording is not wired up for the Compose desktop driver yet. " +
-          "Use the hidden `trailblaze desktop snapshot` command for one-shot captures.",
-      )
+      // DESKTOP carries two drivers: the macOS Accessibility driver (live-viewable) and the
+      // Compose self-driver (recording not wired up).
+      TrailblazeDevicePlatform.DESKTOP -> when (device.trailblazeDriverType) {
+        TrailblazeDriverType.MACOS_AX -> connectMacOsAx(device)
+        else -> ConnectionState.Error(
+          "Recording is not wired up for the Compose desktop driver yet. " +
+            "Use the hidden `trailblaze desktop snapshot` command for one-shot captures.",
+        )
+      }
     }
   } catch (e: Exception) {
     val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
@@ -191,6 +196,51 @@ class DeviceConnectionService(private val deviceManager: TrailblazeDeviceManager
       initialDeviceWidth = initialResponse.deviceWidth,
       initialDeviceHeight = initialResponse.deviceHeight,
     )
+    val toolFactory = MaestroInteractionToolFactory(
+      deviceWidth = stream.deviceWidth,
+      deviceHeight = stream.deviceHeight,
+    )
+    return ConnectionState.Connected(
+      RecordingDeviceConnection(
+        stream = stream,
+        toolFactory = toolFactory,
+        deviceLabel = formatDeviceLabel(device),
+        trailblazeDeviceId = device.trailblazeDeviceId,
+        trailblazeDriverType = device.trailblazeDriverType,
+      ),
+    )
+  }
+
+  /**
+   * Connects the Live Device Viewer to the macOS desktop Accessibility driver's whole-screen
+   * device. Streams full main-display frames + the stitched whole-desktop AX tree via
+   * [MacOsAxDeviceScreenStream], and forwards taps/typing through synthesized `CGEvent`s. Requires
+   * the daemon to be Accessibility-trusted and the screen unlocked (macOS blocks AX while locked) —
+   * the same gates the device list and trail-run path enforce.
+   */
+  private suspend fun connectMacOsAx(device: TrailblazeConnectedDeviceSummary): ConnectionState {
+    if (!xyz.block.trailblaze.host.macosax.MacOsAxNative.isProcessTrusted()) {
+      return ConnectionState.Error(
+        "This process isn't Accessibility-trusted. Grant it in System Settings → Privacy & " +
+          "Security → Accessibility, then Retry.",
+      )
+    }
+    if (xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.isScreenLocked()) {
+      return ConnectionState.Error(
+        "The Mac's screen is locked — macOS blocks Accessibility access while locked. Unlock the " +
+          "screen and Retry.",
+      )
+    }
+    val display = withContext(Dispatchers.IO) {
+      xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.mainDisplaySize()
+    }
+    val stream = MacOsAxDeviceScreenStream(
+      deviceWidth = display.width,
+      deviceHeight = display.height,
+    )
+    // Reuse the Maestro-shaped tool factory: its selector taps route through the agent's
+    // node-selector path, which MacOsAxTrailblazeAgent handles (macOsAx selectors), and its
+    // inputText/pressKey lower to Maestro commands the macOS converter supports.
     val toolFactory = MaestroInteractionToolFactory(
       deviceWidth = stream.deviceWidth,
       deviceHeight = stream.deviceHeight,

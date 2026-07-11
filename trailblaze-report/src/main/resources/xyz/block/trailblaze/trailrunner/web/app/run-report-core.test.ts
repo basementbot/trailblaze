@@ -101,6 +101,34 @@ describe("extractTrace", () => {
     expect(trace[0].i).toBe(1);
   });
 
+  test("folds a TrailblazeSnapshotLog's screenshot + view hierarchy into the preceding tool step", () => {
+    // Shape emitted by the macOS AX replay path: each recordable tool logs a TrailblazeToolLog
+    // (opens the step group), immediately followed by a TrailblazeSnapshotLog (no toolName/action)
+    // carrying that step's screenshot + accessibility tree. The snapshot has a null traceId, so it
+    // must fold into whatever group is currently open rather than being dropped.
+    const nodeTree = { class: "Node", children: [] };
+    const logs = [
+      { class: `${T}.TrailblazeToolLog`, toolName: "tapOnElementBySelector", traceId: "t1", successful: true, durationMs: 5, timestamp: "2024-01-01T00:00:00Z" },
+      { class: `${T}.TrailblazeSnapshotLog`, displayName: "tapOnElementBySelector", screenshotFile: "shot-1.png", trailblazeNodeTree: nodeTree, deviceWidth: 100, deviceHeight: 200, timestamp: "2024-01-01T00:00:01Z" },
+      { class: `${T}.TrailblazeToolLog`, toolName: "assertVisibleBySelector", traceId: "t2", successful: true, durationMs: 5, timestamp: "2024-01-01T00:00:02Z" },
+      { class: `${T}.TrailblazeSnapshotLog`, displayName: "assertVisibleBySelector", screenshotFile: "shot-2.png", trailblazeNodeTree: nodeTree, deviceWidth: 100, deviceHeight: 200, timestamp: "2024-01-01T00:00:03Z" },
+    ];
+    const trace = core.extractTrace(logs);
+    // Two distinct steps (one per tool) — the snapshots fold in, they don't collapse the steps.
+    const tap = trace.find((r) => r.label === "tapOnElementBySelector");
+    const assert = trace.find((r) => r.label === "assertVisibleBySelector");
+    expect(tap?.screenshotFile).toBe("shot-1.png");
+    expect(tap?.viewHierarchy).toBe(nodeTree);
+    expect(assert?.screenshotFile).toBe("shot-2.png");
+    expect(assert?.viewHierarchy).toBe(nodeTree);
+    // The device coordinate space (points) must fold in too, so the viewer scales hierarchy
+    // overlays by device dims — NOT the screenshot's pixel size, which is 2× on Retina/macOS.
+    expect(tap?.deviceWidth).toBe(100);
+    expect(tap?.deviceHeight).toBe(200);
+    expect(assert?.deviceWidth).toBe(100);
+    expect(assert?.deviceHeight).toBe(200);
+  });
+
   test("renders a terminal snapshot (final_screenshot) as its own trailing cell", () => {
     // captureFinalScreenshot logs a TrailblazeSnapshotLog carrying only a screenshotFile +
     // displayName (no tool/action/prompt). It must still produce a cell so the state after the

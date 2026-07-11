@@ -91,3 +91,39 @@ class AxeConnectedDevice(
   trailblazeDriverType = TrailblazeDriverType.IOS_AXE,
   instanceId = udid,
 )
+
+/**
+ * macOS-desktop AX-backed connected device. Drives a running macOS app directly through Apple's
+ * Accessibility (`AXUIElement`) APIs via JNA (see the driver plan in
+ * `docs/devlog/2026-07-10-macos-ax-driver.md`).
+ *
+ * The target is identified by **bundle id** — the macOS analog of the iOS bundle id: stable,
+ * authorable in a committed trail, launchable at any time (`open -b <bundleId>`), and
+ * re-attachable to a running instance (bundleId → live pid at connect time). [pid] is the
+ * currently-resolved process id (an internal detail, not authored). Screen dimensions are the
+ * main-display size in AX points, matching the full-display screenshot's coordinate space.
+ */
+class MacOsAxConnectedDevice(
+  /** Bundle id of the target app, e.g. `com.apple.calculator`. The [instanceId]. The sentinel
+   *  [WHOLE_SCREEN_INSTANCE_ID] means "the whole desktop" — every on-screen app stitched. */
+  val bundleId: String,
+  /** The currently-resolved process id for [bundleId]. `0` / ignored for whole-screen. */
+  val pid: Int,
+  override val deviceWidth: Int,
+  override val deviceHeight: Int,
+) : TrailblazeConnectedDevice(
+  trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+  instanceId = bundleId,
+) {
+  /** True when this device captures the entire desktop (all on-screen apps) rather than one app. */
+  val wholeScreen: Boolean get() = bundleId == WHOLE_SCREEN_INSTANCE_ID
+
+  companion object {
+    /**
+     * Sentinel instance id (`--device desktop/all`) for the whole-desktop macOS device — the one
+     * that shows up in the multi-device grid "when available", matching the whole-screen model of
+     * the iOS/Android/Web drivers. Captures every on-screen app under one tree.
+     */
+    const val WHOLE_SCREEN_INSTANCE_ID = "all"
+  }
+}

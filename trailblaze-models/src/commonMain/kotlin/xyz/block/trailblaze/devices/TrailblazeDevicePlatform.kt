@@ -23,10 +23,16 @@ enum class TrailblazeDevicePlatform(
   WEB("Web Browser"),
 
   /**
-   * The host-side Compose desktop window itself, exposed via the
-   * [xyz.block.trailblaze.compose.driver.rpc.ComposeRpcServer] that the desktop app runs
-   * on `127.0.0.1:52600` (gated by `TrailblazeServerState.AppConfig.enableSelfTestServer`,
-   * default `true`). Hidden from default listings; surface via `--all`.
+   * The macOS desktop. Carries two driver types (see [TrailblazeDriverType]):
+   * - [TrailblazeDriverType.COMPOSE] — the host-side Compose desktop window itself, exposed
+   *   via the [xyz.block.trailblaze.compose.driver.rpc.ComposeRpcServer] that the desktop app
+   *   runs on `127.0.0.1:52600` (gated by `TrailblazeServerState.AppConfig.enableSelfTestServer`,
+   *   default `true`).
+   * - [TrailblazeDriverType.MACOS_AX] — any running macOS app, driven via its Apple
+   *   Accessibility (`AXUIElement`) tree read directly through JNA (see
+   *   `docs/devlog/2026-07-10-macos-ax-driver.md`).
+   *
+   * Hidden from default listings; surface via `--all`.
    */
   DESKTOP("Compose Desktop", hidden = true),
   ;

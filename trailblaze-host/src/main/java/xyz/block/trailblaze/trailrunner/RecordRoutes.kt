@@ -615,6 +615,7 @@ internal class TrailRunnerRecordingService(
       is DriverNodeDetail.AndroidMaestro -> d.resolveText() to d.className?.substringAfterLast('.')
       is DriverNodeDetail.IosMaestro -> d.resolveText() to d.className
       is DriverNodeDetail.IosAxe -> d.resolveText() to (d.type ?: d.role?.removePrefix("AX"))
+      is DriverNodeDetail.MacOsAx -> d.resolveText() to d.role?.removePrefix("AX")
       is DriverNodeDetail.Compose -> d.resolveText() to d.role
       is DriverNodeDetail.Web -> d.ariaName to d.ariaRole
     }
@@ -626,6 +627,7 @@ internal class TrailRunnerRecordingService(
       is DriverNodeDetail.AndroidMaestro -> d.resourceId
       is DriverNodeDetail.IosMaestro -> d.resourceId
       is DriverNodeDetail.IosAxe -> d.uniqueId
+      is DriverNodeDetail.MacOsAx -> d.stringAttribute("AXIdentifier")
       is DriverNodeDetail.Compose -> d.testTag
       is DriverNodeDetail.Web -> null
     }?.takeIf { it.isNotBlank() }

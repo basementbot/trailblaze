@@ -165,6 +165,7 @@ class ConfigCommand : Callable<Int> {
     listOf(
       "Android:" to TrailblazeDevicePlatform.ANDROID,
       "iOS:" to TrailblazeDevicePlatform.IOS,
+      "Desktop:" to TrailblazeDevicePlatform.DESKTOP,
     ).forEach { (label, platform) ->
       printDriverRow(
         label = label,
@@ -196,6 +197,7 @@ class ConfigCommand : Callable<Int> {
     Console.info("  trailblaze config target <name>             Set target app")
     Console.info("  trailblaze config android-driver <type>     Set Android driver (instrumentation|accessibility)")
     Console.info("  trailblaze config ios-driver <type>         Set iOS driver (host|axe)")
+    Console.info("  trailblaze config desktop-driver <type>     Set macOS desktop driver (macos-ax)")
     Console.info("  trailblaze config screenshot-format <fmt>   Set screenshot format (png|jpeg|webp|unset)")
     Console.info("  trailblaze config screenshot-max-dimensions <WxH>  Set max screenshot dimensions")
     Console.info("  trailblaze config screenshot-quality <0..1> Set lossy compression quality")

@@ -247,6 +247,8 @@ object TrailblazeNodeSelectorGenerator {
         namedStructuralIosMaestroStrategies(root, target, detail, parentMap)
       is DriverNodeDetail.IosAxe ->
         namedStructuralIosAxeStrategies(root, target, detail, parentMap)
+      is DriverNodeDetail.MacOsAx ->
+        namedStructuralMacOsAxStrategies(root, target, detail, parentMap)
     }
 
     for ((name, strategy) in namedStrategies) {
@@ -378,6 +380,8 @@ object TrailblazeNodeSelectorGenerator {
       iosMaestroStrategies(root, target, detail, parentMap)
     is DriverNodeDetail.IosAxe ->
       iosAxeStrategies(root, target, detail, parentMap)
+    is DriverNodeDetail.MacOsAx ->
+      macOsAxStrategies(root, target, detail, parentMap)
   }
 
   // --- Private helpers ---

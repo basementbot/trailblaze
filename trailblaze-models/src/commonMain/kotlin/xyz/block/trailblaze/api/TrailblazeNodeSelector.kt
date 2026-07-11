@@ -57,6 +57,9 @@ data class TrailblazeNodeSelector(
   /** iOS AXe (Apple Accessibility API) matcher — used when the tree is [DriverNodeDetail.IosAxe]. */
   val iosAxe: DriverNodeMatch.IosAxe? = null,
 
+  /** macOS desktop AX matcher — used when the tree is [DriverNodeDetail.MacOsAx]. */
+  val macOsAx: DriverNodeMatch.MacOsAx? = null,
+
   // --- Spatial relationships ---
 
   /** Target must be below (lower Y) an element matching this selector. */
@@ -96,7 +99,7 @@ data class TrailblazeNodeSelector(
    */
   @kotlinx.serialization.Transient
   val driverMatch: DriverNodeMatch?
-    get() = androidAccessibility ?: androidMaestro ?: web ?: compose ?: iosMaestro ?: iosAxe
+    get() = androidAccessibility ?: androidMaestro ?: web ?: compose ?: iosMaestro ?: iosAxe ?: macOsAx
 
   companion object {
     /**
@@ -120,6 +123,7 @@ data class TrailblazeNodeSelector(
       compose = match as? DriverNodeMatch.Compose,
       iosMaestro = match as? DriverNodeMatch.IosMaestro,
       iosAxe = match as? DriverNodeMatch.IosAxe,
+      macOsAx = match as? DriverNodeMatch.MacOsAx,
       below = below,
       above = above,
       leftOf = leftOf,
@@ -194,6 +198,13 @@ data class TrailblazeNodeSelector(
       }
       is DriverNodeMatch.Web -> {
         textRegex = match.ariaNameRegex ?: match.ariaDescriptorRegex
+      }
+      is DriverNodeMatch.MacOsAx -> {
+        // Legacy adapter: fold AX-native attribute matches onto the Maestro-shaped selector
+        // as best we can. AX-only concepts (role, subrole, arbitrary attribute keys) have no
+        // legacy equivalent and get dropped.
+        textRegex = match.titleRegex ?: match.valueRegex ?: match.descriptionRegex
+        idRegex = match.identifier
       }
       null -> {}
     }
@@ -487,6 +498,66 @@ sealed interface DriverNodeMatch {
       titleRegex?.let { parts.add("title~\"$it\"") }
       customAction?.let { parts.add("action=\"$it\"") }
       enabled?.let { parts.add(if (it) "enabled" else "disabled") }
+      append(parts.joinToString(", "))
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // macOS desktop AX matcher (Apple Accessibility APIs via JNA)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Matches against [DriverNodeDetail.MacOsAx] nodes using Apple-native macOS AX vocabulary
+   * — exact `AX*` attribute keys and native action names — rather than any normalized
+   * cross-platform shape.
+   *
+   * The named fields cover the common stable attributes; [attributeEquals] is the escape
+   * hatch that keeps this driver's full-fidelity philosophy intact: it matches the string
+   * payload of **any** `AX*` attribute exactly (e.g. `{"AXSubrole": "AXCloseButton"}`), so a
+   * selector is never limited to the pre-named subset. String fields support regex patterns;
+   * [identifier] and [attributeEquals] are exact matches (identity, not text).
+   */
+  @Serializable
+  @SerialName("macOsAx")
+  data class MacOsAx(
+    /** **Matchable.** `AXRole` (e.g. `AXButton`, `AXStaticText`, `AXWindow`). */
+    val roleRegex: String? = null,
+    /** **Matchable.** `AXSubrole` (e.g. `AXCloseButton`, `AXSecureTextField`). */
+    val subroleRegex: String? = null,
+    /** **Matchable.** `AXRoleDescription` (e.g. "button", "close button"). */
+    val roleDescriptionRegex: String? = null,
+    /** **Matchable.** `AXTitle`. */
+    val titleRegex: String? = null,
+    /** **Matchable.** `AXValue` (when a string). */
+    val valueRegex: String? = null,
+    /** **Matchable.** `AXDescription`. */
+    val descriptionRegex: String? = null,
+    /** **Matchable.** `AXHelp` — tooltip/help text. */
+    val helpRegex: String? = null,
+    /** **Matchable.** Exact match on `AXIdentifier` set by the app. */
+    val identifier: String? = null,
+    /** **Matchable.** The element's `actions` list must contain this exact native action name. */
+    val action: String? = null,
+    /**
+     * **Matchable.** Exact-match predicates on arbitrary `AX*` attribute string values. Each
+     * entry requires the node's `attributes[key]` to be a string equal to the value. Keeps
+     * selectors able to target any native attribute, not just the pre-named ones above.
+     */
+    val attributeEquals: Map<String, String>? = null,
+  ) : DriverNodeMatch {
+
+    override fun description(): String = buildString {
+      val parts = mutableListOf<String>()
+      roleRegex?.let { parts.add("role~\"$it\"") }
+      subroleRegex?.let { parts.add("subrole~\"$it\"") }
+      roleDescriptionRegex?.let { parts.add("roleDesc~\"$it\"") }
+      titleRegex?.let { parts.add("\"$it\"") }
+      valueRegex?.let { parts.add("value~\"$it\"") }
+      descriptionRegex?.let { parts.add("desc~\"$it\"") }
+      helpRegex?.let { parts.add("help~\"$it\"") }
+      identifier?.let { parts.add("id=\"$it\"") }
+      action?.let { parts.add("action=\"$it\"") }
+      attributeEquals?.forEach { (k, v) -> parts.add("$k=\"$v\"") }
       append(parts.joinToString(", "))
     }
   }

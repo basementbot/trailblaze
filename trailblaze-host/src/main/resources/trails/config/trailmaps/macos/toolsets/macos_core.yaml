@@ -1,0 +1,14 @@
+# Core tools for the macOS desktop Accessibility (AX) driver — the `macos_*` family, parallel to
+# the Compose desktop driver's `compose_*` tools. Scoped to the `macos-ax` driver so they surface
+# in the Live Device Viewer's Tool Palette, the `toolbox`, and trail authoring for macOS targets.
+id: macos_core
+description: "macOS desktop Accessibility driver tools: launch an app, tap an element, type text, press a key, assert visibility, and open a URL in a browser."
+drivers:
+  - macos-ax
+tools:
+  - macos_launchApp
+  - macos_tapOnElement
+  - macos_inputText
+  - macos_pressKey
+  - macos_assertVisible
+  - macos_openUrl

@@ -798,4 +798,162 @@ sealed interface DriverNodeDetail {
       )
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // macOS desktop via Apple Accessibility APIs (AXUIElement, JNA-direct)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * macOS desktop element properties captured directly from Apple's Accessibility APIs
+   * (`AXUIElement`) via JNA — see the driver plan in
+   * `docs/devlog/2026-07-10-macos-ax-driver.md`.
+   *
+   * Unlike every other variant here (which normalizes down to a fixed field list), this one
+   * is **fully dynamic and 100% native**: real macOS AX elements expose a large, open-ended,
+   * per-role attribute set (a Finder window alone exposes ~30 attributes, barely overlapping
+   * its app element's ~20), so there is no fixed field subset that wouldn't lose real data.
+   * Every attribute macOS reports is captured verbatim in [attributes], keyed by the exact,
+   * unmodified `AX*` string macOS itself uses — no stripping the `AX` prefix, no camelCasing,
+   * no pulling `AXRole` into a separately-named convenience field that could drift from the
+   * map. Matching logic reads out of [attributes] directly (e.g. `attributes["AXRole"]`).
+   *
+   * The one non-attribute field is [pid]: it's the argument to `AXUIElementCreateApplication`,
+   * not something the element exposes as an attribute, so it lives as a plain field.
+   *
+   * `AXChildren` is intentionally absent from [attributes] — it drives [TrailblazeNode.children]
+   * structurally instead, the same as every other driver.
+   */
+  @Serializable
+  @SerialName("macOsAx")
+  data class MacOsAx(
+    /**
+     * Owning process id — the argument passed to `AXUIElementCreateApplication`. Not an AX
+     * attribute (the element doesn't report it), so it's a plain field rather than a map key.
+     */
+    val pid: Int,
+
+    /**
+     * Every attribute name returned by `AXUIElementCopyAttributeNames`, resolved via
+     * `AXUIElementCopyAttributeValue` and decoded into a [MacOsAxAttributeValue]. Keys are the
+     * exact native `AX*` strings (`AXRole`, `AXSubrole`, `AXTitle`, `AXValue`, `AXIdentifier`,
+     * …). `AXChildren` is excluded — it drives [TrailblazeNode.children] instead.
+     */
+    val attributes: Map<String, MacOsAxAttributeValue> = emptyMap(),
+
+    /**
+     * The element's full `AXUIElementCopyActionNames` result — exact native action strings
+     * (`AXPress`, `AXRaise`, `AXShowMenu`, …), never mapped onto an invented cross-platform
+     * action enum. Empty for non-actionable elements.
+     */
+    val actions: List<String> = emptyList(),
+
+    /**
+     * The element's `AXUIElementCopyParameterizedAttributeNames` result — names only.
+     * Resolving parameterized attribute *values* needs a parameter to pass in and is out of
+     * scope for v1 (see the plan's "out of scope" section).
+     */
+    val parameterizedAttributeNames: List<String> = emptyList(),
+  ) : DriverNodeDetail {
+
+    /** Convenience: the string payload of an attribute, or null if absent / not a [Str]. */
+    fun stringAttribute(name: String): String? =
+      (attributes[name] as? MacOsAxAttributeValue.Str)?.value?.takeIf { it.isNotBlank() }
+
+    /** Convenience: `attributes["AXRole"]` as a string — the native AX role. */
+    val role: String? get() = stringAttribute("AXRole")
+
+    override val matchablePropertyNames: Set<String>
+      get() = attributes.keys.intersect(MATCHABLE_ATTRIBUTES)
+
+    override val hasIdentifiableProperties: Boolean
+      get() = IDENTITY_ATTRIBUTES.any { stringAttribute(it) != null }
+
+    /**
+     * Interactive if the element advertises any actionable AX action, or its `AXRole` is one
+     * of the native control roles in [INTERACTIVE_ROLES]. macOS reports actions per element
+     * (`AXPress` on buttons, `AXIncrement`/`AXDecrement` on steppers, etc.), so the action
+     * list is the primary signal, with the role whitelist as a fallback.
+     */
+    override val isInteractive: Boolean
+      get() = actions.any { it in INTERACTIVE_ACTIONS } || (role != null && role in INTERACTIVE_ROLES)
+
+    /** Resolves text priority: AXTitle > AXValue (when a string) > AXDescription. */
+    fun resolveText(): String? =
+      stringAttribute("AXTitle")
+        ?: stringAttribute("AXValue")
+        ?: stringAttribute("AXDescription")
+
+    companion object {
+      /**
+       * Native `AX*` attribute names that carry a stable enough identity to key a recorded
+       * selector on. Everything else (transient geometry like `AXFrame`/`AXPosition`, focus
+       * state, live values) stays out of selectors even though it's still captured in
+       * [attributes] for display and matching context. Selector generators intersect this
+       * with the attributes actually present on a node.
+       */
+      val MATCHABLE_ATTRIBUTES: Set<String> = setOf(
+        "AXRole",
+        "AXSubrole",
+        "AXRoleDescription",
+        "AXIdentifier",
+        "AXDOMIdentifier",
+        "AXTitle",
+        "AXDescription",
+        "AXValue",
+        "AXHelp",
+        "AXPlaceholderValue",
+        "AXMenuItemCmdChar",
+        "AXMenuItemCmdModifiers",
+      )
+
+      /** Attributes whose non-blank presence makes a node selector-identifiable on its own. */
+      val IDENTITY_ATTRIBUTES: Set<String> = setOf(
+        "AXTitle",
+        "AXValue",
+        "AXDescription",
+        "AXIdentifier",
+        "AXDOMIdentifier",
+        "AXHelp",
+      )
+
+      /** Native AX actions that indicate an element is interactive. */
+      val INTERACTIVE_ACTIONS: Set<String> = setOf(
+        "AXPress",
+        "AXConfirm",
+        "AXPick",
+        "AXIncrement",
+        "AXDecrement",
+        "AXShowMenu",
+        "AXShowAlternateUI",
+      )
+
+      /**
+       * Native macOS AX roles that represent interactive controls. Anything outside this list
+       * is treated as static content unless it advertises an interactive action.
+       */
+      val INTERACTIVE_ROLES: Set<String> = setOf(
+        "AXButton",
+        "AXMenuButton",
+        "AXPopUpButton",
+        "AXMenuItem",
+        "AXMenuBarItem",
+        "AXCheckBox",
+        "AXRadioButton",
+        "AXTextField",
+        "AXTextArea",
+        "AXSecureTextField",
+        "AXComboBox",
+        "AXSlider",
+        "AXStepper",
+        "AXIncrementor",
+        "AXLink",
+        "AXTab",
+        "AXTabGroup",
+        "AXDisclosureTriangle",
+        "AXColorWell",
+        "AXCell",
+        "AXRow",
+      )
+    }
+  }
 }

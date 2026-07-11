@@ -98,7 +98,10 @@ class DeviceListCommand : Callable<Int> {
       val devices = allDevices.filter {
         it.trailblazeDriverType != TrailblazeDriverType.REVYL_ANDROID &&
           it.trailblazeDriverType != TrailblazeDriverType.REVYL_IOS &&
-          (showAll || !it.platform.hidden)
+          // DESKTOP is `hidden` for the Compose self-driver, but the macOS Accessibility driver
+          // (MACOS_AX) rides on DESKTOP and IS user-facing — always list it. Compose stays hidden
+          // unless `--all`.
+          (showAll || !it.platform.hidden || it.trailblazeDriverType == TrailblazeDriverType.MACOS_AX)
       }.let { filtered ->
         // Re-include named web browser instances that the UI-level filter strips when
         // web mode is off. They're real, running browsers — users need them visible

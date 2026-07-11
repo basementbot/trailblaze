@@ -95,5 +95,12 @@ private fun TrailblazeNodeSelector.driverMatchHasSemanticIdentifier(): Boolean {
         match.valueRegex != null ||
         match.uniqueId != null ||
         match.titleRegex != null
+    is DriverNodeMatch.MacOsAx ->
+      match.titleRegex != null ||
+        match.valueRegex != null ||
+        match.descriptionRegex != null ||
+        match.helpRegex != null ||
+        match.identifier != null ||
+        !match.attributeEquals.isNullOrEmpty()
   }
 }

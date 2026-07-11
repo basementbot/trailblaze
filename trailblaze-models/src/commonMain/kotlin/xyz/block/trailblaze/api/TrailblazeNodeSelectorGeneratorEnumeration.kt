@@ -118,6 +118,18 @@ internal fun runVariableWildcardedTextCandidate(
     detail.title to { r: String -> nameFor("Title", r, detail.title) to DriverNodeMatch.IosAxe(titleRegex = r) },
   )
 
+  is DriverNodeDetail.MacOsAx -> firstStableLabel(
+    detail.stringAttribute("AXTitle") to { r: String ->
+      nameFor("AXTitle", r, detail.stringAttribute("AXTitle")) to DriverNodeMatch.MacOsAx(titleRegex = r)
+    },
+    detail.stringAttribute("AXValue") to { r: String ->
+      nameFor("AXValue", r, detail.stringAttribute("AXValue")) to DriverNodeMatch.MacOsAx(valueRegex = r)
+    },
+    detail.stringAttribute("AXDescription") to { r: String ->
+      nameFor("AXDescription", r, detail.stringAttribute("AXDescription")) to DriverNodeMatch.MacOsAx(descriptionRegex = r)
+    },
+  )
+
   is DriverNodeDetail.Web -> firstStableLabel(
     detail.ariaName to { r: String -> nameFor("ARIA name", r, detail.ariaName) to DriverNodeMatch.Web(ariaNameRegex = r) },
     detail.ariaDescriptor to { r: String ->
@@ -205,6 +217,12 @@ private fun matchTier(match: DriverNodeMatch): Int = when (match) {
   is DriverNodeMatch.IosAxe -> when {
     match.uniqueId != null -> 0
     match.labelRegex != null || match.valueRegex != null || match.titleRegex != null -> 1
+    else -> 2
+  }
+  is DriverNodeMatch.MacOsAx -> when {
+    match.identifier != null -> 0
+    match.titleRegex != null || match.valueRegex != null || match.descriptionRegex != null ||
+      match.helpRegex != null || !match.attributeEquals.isNullOrEmpty() -> 1
     else -> 2
   }
   is DriverNodeMatch.Web -> when {

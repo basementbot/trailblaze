@@ -80,6 +80,18 @@ enum class TrailblazeDriverType(
     yamlKey = "compose",
     cliShortName = null,
   ),
+
+  // The macOS desktop Accessibility (AX) driver. Like COMPOSE it targets DESKTOP, but instead
+  // of the in-process Compose RPC server it drives *any* running macOS app by reading its
+  // AXUIElement tree directly via JNA (see docs/devlog/2026-07-10-macos-ax-driver.md). This is
+  // the second driver type on DESKTOP, mirroring how IOS carries both IOS_HOST and IOS_AXE.
+  // cliShortName "macos-ax" doesn't collide with iOS's "axe".
+  MACOS_AX(
+    platform = TrailblazeDevicePlatform.DESKTOP,
+    requiresHost = true,
+    yamlKey = "macos-ax",
+    cliShortName = "macos-ax",
+  ),
   ;
 
   companion object {
@@ -111,7 +123,14 @@ enum class TrailblazeDriverType(
     fun selectableForPlatform(platform: TrailblazeDevicePlatform): List<TrailblazeDriverType> =
       entries.filter { it.platform == platform && it.cliShortName != null }
 
+    /**
+     * Resolves a driver type from either its enum [name] (`MACOS_AX`) or its [yamlKey]
+     * (`macos-ax`). Name is tried first for backward compatibility; the yamlKey fallback lets
+     * trail `config.driver:` values (which use the hyphenated yamlKey convention, e.g.
+     * `ios-axe`, `macos-ax`) resolve without the caller having to normalize them first.
+     */
     fun fromString(value: String): TrailblazeDriverType? =
       entries.find { it.name.equals(value, ignoreCase = true) }
+        ?: entries.find { it.yamlKey.equals(value, ignoreCase = true) }
   }
 }
