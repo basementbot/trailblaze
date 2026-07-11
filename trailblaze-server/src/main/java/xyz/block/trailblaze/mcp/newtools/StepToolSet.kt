@@ -160,6 +160,12 @@ class StepToolSet(
           } else {
             IosCompactElementList.build(tree, details, screenState.deviceHeight).text
           }
+          // Without this branch the macOS tree fell through to `null` and every detail flag
+          // (--bounds / --offscreen / --occluded) was silently a no-op on the desktop driver:
+          // the baseline render was returned unchanged and the user saw no error.
+          "macos" -> xyz.block.trailblaze.api.MacOsAxCompactElementList.build(
+            tree, details, screenState.deviceHeight, screenState.deviceWidth,
+          ).text
           else -> null
         }
         if (elements != null) {
@@ -182,11 +188,13 @@ class StepToolSet(
     if (tree.driverDetail is DriverNodeDetail.AndroidMaestro) return "android"
     if (tree.driverDetail is DriverNodeDetail.IosMaestro) return "ios"
     if (tree.driverDetail is DriverNodeDetail.IosAxe) return "ios"
+    if (tree.driverDetail is DriverNodeDetail.MacOsAx) return "macos"
     val firstChild = tree.children.firstOrNull() ?: return null
     if (firstChild.driverDetail is DriverNodeDetail.AndroidAccessibility) return "android"
     if (firstChild.driverDetail is DriverNodeDetail.AndroidMaestro) return "android"
     if (firstChild.driverDetail is DriverNodeDetail.IosMaestro) return "ios"
     if (firstChild.driverDetail is DriverNodeDetail.IosAxe) return "ios"
+    if (firstChild.driverDetail is DriverNodeDetail.MacOsAx) return "macos"
     return null
   }
 
@@ -260,7 +268,7 @@ class StepToolSet(
     hint: String? = null,
     @LLMDescription("YAML tool sequence to execute directly, bypassing AI agent. Same format as recording.tools in trail files.")
     tools: String? = null,
-    @LLMDescription("Comma-separated snapshot detail levels: BOUNDS, OFFSCREEN, OCCLUDED, ALL_ELEMENTS. Enriches the screen summary in the response. OCCLUDED is web-only — surfaces elements hidden under popups/modals.")
+    @LLMDescription("Comma-separated snapshot detail levels: BOUNDS, OFFSCREEN, OCCLUDED, ALL_ELEMENTS. Enriches the screen summary in the response. OCCLUDED (web + macOS) surfaces elements hidden under popups/modals, or behind other windows on the desktop.")
     snapshotDetails: String? = null,
     @LLMDescription("Text-only mode: skip screenshots, use text-only screen analysis (no vision tokens), and skip disk logging.")
     fast: Boolean = false,

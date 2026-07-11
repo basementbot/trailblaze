@@ -78,6 +78,7 @@ object MacOsAxNative {
   private val kCGWindowOwnerPID by lazy { cg.getGlobalVariableAddress("kCGWindowOwnerPID").getPointer(0) }
   private val kCGWindowOwnerName by lazy { cg.getGlobalVariableAddress("kCGWindowOwnerName").getPointer(0) }
   private val kCGWindowLayer by lazy { cg.getGlobalVariableAddress("kCGWindowLayer").getPointer(0) }
+  private val kCGWindowBounds by lazy { cg.getGlobalVariableAddress("kCGWindowBounds").getPointer(0) }
 
   // CGWindowListOption bits: OnScreenOnly (1<<0) | ExcludeDesktopElements (1<<4) = 17.
   private const val K_CG_WINDOW_LIST_ON_SCREEN_EXCL_DESKTOP = 17
@@ -127,6 +128,55 @@ object MacOsAxNative {
 
   /** One on-screen application: its process id and owner name (e.g. `Calculator`). */
   data class OnScreenApp(val pid: Int, val ownerName: String)
+
+  /**
+   * One on-screen window: its owning process and its global bounds in AX points (top-left origin,
+   * the same coordinate space as `AXFrame`/`AXPosition` and [TrailblazeNode.Bounds]).
+   */
+  data class OnScreenWindow(
+    val pid: Int,
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+  )
+
+  /**
+   * Every normal on-screen window, **front-to-back** — `CGWindowListCopyWindowInfo` returns the
+   * list in z-order, and layer 0 keeps it to real app windows (no Dock, menu-bar extras, or
+   * desktop icons). Minimized and hidden windows are absent: the on-screen-only option already
+   * excludes them.
+   *
+   * This is the only z-order signal available to the driver — AX itself exposes no global tree and
+   * no stacking information — so it's what occlusion is computed from ([MacOsAxOcclusion]).
+   */
+  fun onScreenWindows(): List<OnScreenWindow> {
+    val array = cgWindowListCopyWindowInfo.invokePointer(
+      arrayOf(K_CG_WINDOW_LIST_ON_SCREEN_EXCL_DESKTOP, 0),
+    )
+    if (array == null || array == Pointer.NULL) return emptyList()
+    return try {
+      val count = arrayCount(array)
+      val windows = mutableListOf<OnScreenWindow>()
+      for (i in 0 until count) {
+        val dict = arrayValueAt(array, i) // CFDictionaryRef — borrowed (owned by the array)
+        val layer = dictInt(dict, kCGWindowLayer) ?: continue
+        if (layer != 0) continue
+        val pid = dictInt(dict, kCGWindowOwnerPID) ?: continue
+        val boundsDict = cfDictionaryGetValue.invokePointer(arrayOf(dict, kCGWindowBounds))
+        if (boundsDict == null || boundsDict == Pointer.NULL) continue
+        val x = dictInt(boundsDict, cfString("X")) ?: continue
+        val y = dictInt(boundsDict, cfString("Y")) ?: continue
+        val w = dictInt(boundsDict, cfString("Width")) ?: continue
+        val h = dictInt(boundsDict, cfString("Height")) ?: continue
+        if (w <= 0 || h <= 0) continue
+        windows += OnScreenWindow(pid = pid, left = x, top = y, right = x + w, bottom = y + h)
+      }
+      windows
+    } finally {
+      release(array)
+    }
+  }
 
   /**
    * The distinct applications that own a normal on-screen window right now, via

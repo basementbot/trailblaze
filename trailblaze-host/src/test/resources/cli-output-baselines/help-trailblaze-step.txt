@@ -45,7 +45,7 @@ Requires an LLM provider configured (`trailblaze config llm`).
                               waypoint capture: ALL_ELEMENTS bypasses the
                               on-device accessibility-importance filter so
                               RecyclerView children land in the captured
-                              trailblazeNodeTree. OCCLUDED is web-only and
+                              trailblazeNodeTree. OCCLUDED (web + macOS)
                               surfaces elements hidden under popups/modals so
                               the captured tree includes what's actually behind
                               the overlay.

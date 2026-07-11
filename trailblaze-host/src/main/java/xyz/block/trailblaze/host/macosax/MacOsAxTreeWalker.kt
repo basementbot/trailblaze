@@ -2,6 +2,7 @@ package xyz.block.trailblaze.host.macosax
 
 import com.sun.jna.Pointer
 import xyz.block.trailblaze.api.DriverNodeDetail
+import xyz.block.trailblaze.host.macosax.MacOsAxOcclusion.Rect
 import xyz.block.trailblaze.api.MacOsAxAttributeValue
 import xyz.block.trailblaze.api.TrailblazeNode
 
@@ -85,7 +86,7 @@ object MacOsAxTreeWalker {
     return TrailblazeNode(
       nodeId = counter.next(),
       bounds = null,
-      children = appTrees,
+      children = appTrees.map { markOccluded(it, MacOsAxNative.onScreenWindows()) },
       driverDetail = DriverNodeDetail.MacOsAx(
         pid = 0,
         // Synthetic assembly root (not a real AX element) — a stable container for the per-app
@@ -223,5 +224,68 @@ object MacOsAxTreeWalker {
       right = (x + width).toInt(),
       bottom = (y + height).toInt(),
     )
+  }
+
+  /**
+   * Marks every element of one app's subtree that is buried behind a window stacked above it.
+   *
+   * Occlusion is decided per **window**, because that's what actually hides things on a desktop:
+   * find the AXWindow's place in the front-to-back [windows] list, take every window ahead of it as
+   * an occluder, and flag the window's descendants that those occluders fully cover. Elements with
+   * no bounds are left alone — there's no geometry to judge them by.
+   *
+   * The AX API exposes no stacking order of its own, so an AXWindow is located in the CG list by
+   * owning pid plus the best-overlapping rect: two windows of the same app can share a size and
+   * position is what separates them. A window we can't place is treated as un-occluded — the
+   * conservative direction, since a wrongly-hidden element is invisible to the agent and
+   * unexplainable to the user, while a wrongly-shown one merely costs tokens.
+   */
+  private fun markOccluded(appNode: TrailblazeNode, windows: List<MacOsAxNative.OnScreenWindow>): TrailblazeNode {
+    val children = appNode.children.map { windowNode ->
+      val bounds = windowNode.bounds
+      val pid = (windowNode.driverDetail as? DriverNodeDetail.MacOsAx)?.pid
+      if (bounds == null || pid == null) return@map windowNode
+
+      val index = indexOfWindow(pid, bounds, windows) ?: return@map windowNode
+      val occluders = windows.take(index).map { Rect(it.left, it.top, it.right, it.bottom) }
+      if (occluders.isEmpty()) return@map windowNode
+
+      applyOcclusion(windowNode, occluders)
+    }
+    return appNode.copy(children = children)
+  }
+
+  /** Recursively flags [node] and its descendants that [occluders] completely cover. */
+  private fun applyOcclusion(node: TrailblazeNode, occluders: List<Rect>): TrailblazeNode {
+    val detail = node.driverDetail as? DriverNodeDetail.MacOsAx
+    val bounds = node.bounds
+    val hidden = detail != null && bounds != null &&
+      MacOsAxOcclusion.isFullyCovered(Rect(bounds.left, bounds.top, bounds.right, bounds.bottom), occluders)
+    return node.copy(
+      driverDetail = if (hidden) detail!!.copy(occluded = true) else node.driverDetail,
+      children = node.children.map { applyOcclusion(it, occluders) },
+    )
+  }
+
+  /** The index of the window owned by [pid] whose rect best overlaps [bounds], or null if none do. */
+  private fun indexOfWindow(
+    pid: Int,
+    bounds: TrailblazeNode.Bounds,
+    windows: List<MacOsAxNative.OnScreenWindow>,
+  ): Int? {
+    var bestIndex: Int? = null
+    var bestOverlap = 0L
+    windows.forEachIndexed { index, window ->
+      if (window.pid != pid) return@forEachIndexed
+      val overlapX = minOf(bounds.right, window.right) - maxOf(bounds.left, window.left)
+      val overlapY = minOf(bounds.bottom, window.bottom) - maxOf(bounds.top, window.top)
+      if (overlapX <= 0 || overlapY <= 0) return@forEachIndexed
+      val overlap = overlapX.toLong() * overlapY
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap
+        bestIndex = index
+      }
+    }
+    return bestIndex
   }
 }

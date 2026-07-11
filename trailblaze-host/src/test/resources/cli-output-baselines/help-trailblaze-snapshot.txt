@@ -5,7 +5,7 @@
 # Reviewers: scrutinize diffs to baselines the same way you would scrutinize a UI screenshot —
 # small wording / spacing changes can be intentional or accidental.
 # ----------------------------------------------------------------------
-Usage: trailblaze snapshot [-hvV] [--all] [--bounds] [--offscreen]
+Usage: trailblaze snapshot [-hvV] [--all] [--bounds] [--occluded] [--offscreen]
                            [--screenshot] [-d=<device>] [--headless=<headless>]
 Capture the current screen's UI tree (fast, no AI, no actions)
       --all               Show all visible elements, including those normally
@@ -28,6 +28,8 @@ Capture the current screen's UI tree (fast, no AI, no actions)
                             --headless=false to force a visible browser,
                             --headless=true to force headless. Ignored for
                             non-web devices.
+      --occluded          Include elements hidden behind other
+                            windows/overlays, marked (occluded)
       --offscreen         Include offscreen elements marked (offscreen)
       --screenshot        Save a screenshot to disk and print the file path
   -v, --verbose           Enable verbose output

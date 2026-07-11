@@ -107,7 +107,7 @@ class StepCommand : Callable<Int> {
       "Comma-separated snapshot detail levels passed through to the daemon's step tool: " +
         "BOUNDS, OFFSCREEN, OCCLUDED, ALL_ELEMENTS. Useful for waypoint capture: ALL_ELEMENTS bypasses " +
         "the on-device accessibility-importance filter so RecyclerView children land in the " +
-        "captured trailblazeNodeTree. OCCLUDED is web-only and surfaces elements hidden under " +
+        "captured trailblazeNodeTree. OCCLUDED (web + macOS) surfaces elements hidden under " +
         "popups/modals so the captured tree includes what's actually behind the overlay."
     ],
   )

@@ -38,6 +38,12 @@ class SnapshotCommand : Callable<Int> {
   @Option(names = ["--offscreen"], description = ["Include offscreen elements marked (offscreen)"])
   var offscreen: Boolean = false
 
+  @Option(
+    names = ["--occluded"],
+    description = ["Include elements hidden behind other windows/overlays, marked (occluded)"],
+  )
+  var occluded: Boolean = false
+
   @Option(names = ["--screenshot"], description = ["Save a screenshot to disk and print the file path"])
   var screenshot: Boolean = false
 
@@ -61,11 +67,12 @@ class SnapshotCommand : Callable<Int> {
       val details = buildList {
         if (bounds) add("BOUNDS")
         if (offscreen) add("OFFSCREEN")
+        if (occluded) add("OCCLUDED")
         if (all) add("ALL_ELEMENTS")
       }.joinToString(",").ifEmpty { null }
       // Use fast mode only when no detail enrichment is needed — bounds/offscreen
       // require a full screen capture to build the compact element list with coordinates.
-      val needsFullCapture = bounds || offscreen || screenshot || all
+      val needsFullCapture = bounds || offscreen || occluded || screenshot || all
       val args = mutableMapOf<String, Any?>(
         "objective" to "Capture screen state",
         "tools" to yaml,

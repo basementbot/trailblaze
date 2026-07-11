@@ -37,8 +37,9 @@ enum class SnapshotDetail {
    * annotations so the LLM can inspect what's under an overlay.
    *
    * Currently a no-op on platforms without a hit-test signal (Android, iOS,
-   * Compose). Web (Playwright) uses `document.elementFromPoint` to compute
-   * occlusion accurately.
+   * Compose). Web (Playwright) uses `document.elementFromPoint`; macOS computes it
+   * from the window z-order, so a `desktop/all` capture hides what's buried behind
+   * other windows.
    */
   OCCLUDED,
 

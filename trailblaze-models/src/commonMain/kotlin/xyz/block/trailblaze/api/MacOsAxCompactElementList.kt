@@ -33,6 +33,7 @@ object MacOsAxCompactElementList {
   ): CompactElements {
     val includeBounds = SnapshotDetail.BOUNDS in details
     val includeOffscreen = SnapshotDetail.OFFSCREEN in details
+    val includeOccluded = SnapshotDetail.OCCLUDED in details
     val includeAllElements = SnapshotDetail.ALL_ELEMENTS in details
     val lines = mutableListOf<String>()
     val elementNodeIds = mutableListOf<Long>()
@@ -40,6 +41,7 @@ object MacOsAxCompactElementList {
     val refMapping = mutableMapOf<String, Long>()
     val refTracker = ElementRef.RefTracker()
     var offscreenCount = 0
+    var occludedCount = 0
     walk(
       node = root,
       depth = 0,
@@ -50,16 +52,21 @@ object MacOsAxCompactElementList {
       refTracker = refTracker,
       includeBounds = includeBounds,
       includeOffscreen = includeOffscreen,
+      includeOccluded = includeOccluded,
       includeAllElements = includeAllElements,
       screenHeight = screenHeight,
       screenWidth = screenWidth,
       onOffscreen = { offscreenCount++ },
+      onOccluded = { occludedCount++ },
     )
     val text = buildString {
       if (lines.isEmpty()) append("(no elements found)")
       else append(lines.joinToString("\n"))
       if (!includeOffscreen && offscreenCount > 0) {
         append("\n($offscreenCount offscreen elements hidden — use --offscreen to show)")
+      }
+      if (!includeOccluded && occludedCount > 0) {
+        append("\n($occludedCount elements hidden behind other windows — use --occluded to show)")
       }
     }
     return CompactElements(
@@ -80,16 +87,19 @@ object MacOsAxCompactElementList {
     refTracker: ElementRef.RefTracker,
     includeBounds: Boolean,
     includeOffscreen: Boolean,
+    includeOccluded: Boolean,
     includeAllElements: Boolean,
     screenHeight: Int,
     screenWidth: Int,
     onOffscreen: () -> Unit,
+    onOccluded: () -> Unit,
   ) {
     val detail = node.driverDetail as? DriverNodeDetail.MacOsAx
     if (detail == null) {
       node.children.forEach {
         walk(it, depth, lines, elementNodeIds, elementBounds, refMapping, refTracker,
-          includeBounds, includeOffscreen, includeAllElements, screenHeight, screenWidth, onOffscreen)
+          includeBounds, includeOffscreen, includeOccluded, includeAllElements, screenHeight, screenWidth,
+          onOffscreen, onOccluded)
       }
       return
     }
@@ -97,6 +107,15 @@ object MacOsAxCompactElementList {
     val offscreen = CompactElementListUtils.isOffscreen(node, screenHeight, screenWidth)
     if (offscreen && !includeOffscreen) {
       if (detail.hasIdentifiableProperties) onOffscreen()
+      return
+    }
+
+    // An element buried under another window can't be clicked — the window on top takes the click —
+    // so listing it would invite the agent to act on something the user can't even see. Prune the
+    // whole subtree: everything inside a covered window is covered too. See SnapshotDetail.OCCLUDED.
+    if (detail.occluded && !includeOccluded) {
+      if (detail.hasIdentifiableProperties) onOccluded()
+      countOccludedDescendants(node, onOccluded)
       return
     }
 
@@ -118,22 +137,39 @@ object MacOsAxCompactElementList {
       val annotations = buildAnnotations(detail, composite)
       val boundsStr = if (includeBounds) CompactElementListUtils.boundsAnnotation(node) else ""
       val offscreenStr = if (includeOffscreen && offscreen) " (offscreen)" else ""
+      val occludedStr = if (includeOccluded && detail.occluded) " (occluded)" else ""
       val center = node.bounds?.let { it.centerX to it.centerY } ?: (0 to 0)
       val ref = refTracker.ref(composite, role, center.first, center.second)
-      lines.add("$indent[$ref] $descriptor$annotations$boundsStr$offscreenStr")
+      lines.add("$indent[$ref] $descriptor$annotations$boundsStr$offscreenStr$occludedStr")
       elementNodeIds.add(node.nodeId)
       refMapping[ref] = node.nodeId
       node.bounds?.let { elementBounds.add(it) }
       node.children.forEach {
         walk(it, depth + 1, lines, elementNodeIds, elementBounds, refMapping, refTracker,
-          includeBounds, includeOffscreen, includeAllElements, screenHeight, screenWidth, onOffscreen)
+          includeBounds, includeOffscreen, includeOccluded, includeAllElements, screenHeight, screenWidth,
+          onOffscreen, onOccluded)
       }
     } else {
       // Structural / empty container — skip, recurse at the same depth.
       node.children.forEach {
         walk(it, depth, lines, elementNodeIds, elementBounds, refMapping, refTracker,
-          includeBounds, includeOffscreen, includeAllElements, screenHeight, screenWidth, onOffscreen)
+          includeBounds, includeOffscreen, includeOccluded, includeAllElements, screenHeight, screenWidth,
+          onOffscreen, onOccluded)
       }
+    }
+  }
+
+  /**
+   * Counts the identifiable elements inside a pruned occluded subtree, so the "N elements hidden
+   * behind other windows" tally reflects everything that was withheld rather than just the covered
+   * container the walk stopped at. A buried Finder window is ~1,700 elements; reporting it as 1
+   * would misrepresent how much of the desktop the default view is choosing not to show you.
+   */
+  private fun countOccludedDescendants(node: TrailblazeNode, onOccluded: () -> Unit) {
+    node.children.forEach { child ->
+      val detail = child.driverDetail as? DriverNodeDetail.MacOsAx
+      if (detail != null && detail.hasIdentifiableProperties) onOccluded()
+      countOccludedDescendants(child, onOccluded)
     }
   }
 

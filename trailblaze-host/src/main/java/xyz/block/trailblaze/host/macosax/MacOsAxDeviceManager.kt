@@ -1,5 +1,6 @@
 package xyz.block.trailblaze.host.macosax
 
+import xyz.block.trailblaze.api.DriverNodeDetail
 import xyz.block.trailblaze.api.ScreenState
 import xyz.block.trailblaze.api.TrailblazeNode
 import xyz.block.trailblaze.api.TrailblazeNodeSelectorResolver
@@ -86,6 +87,16 @@ class MacOsAxDeviceManager(
   private fun executeTapOnElement(action: MacOsAxAction.TapOnElement): ExecutionResult {
     val node = awaitSelector(action.nodeSelector, action.timeoutMs)
     if (node != null) {
+      // Refuse to click something buried under another window. A tap resolves to global screen
+      // coordinates and lands on whatever is topmost there, so clicking an occluded element doesn't
+      // fail — it silently clicks the window on top of it, in a different app. Fail loudly instead;
+      // the caller's own timeout/retry is the right place to handle "the thing I want is covered".
+      if ((node.driverDetail as? DriverNodeDetail.MacOsAx)?.occluded == true) {
+        error(
+          "Element matched by ${action.nodeSelector.description()} is hidden behind another window — " +
+            "clicking it would hit the window on top. Bring its window to the front first.",
+        )
+      }
       val center = node.centerPoint() ?: error("Element matched but has no bounds: ${action.nodeSelector.description()}")
       executor.tapAt(center.first, center.second)
       return ExecutionResult(center.first, center.second)
@@ -101,6 +112,15 @@ class MacOsAxDeviceManager(
   private fun executeAssertVisible(action: MacOsAxAction.AssertVisible): ExecutionResult {
     val node = awaitSelector(action.nodeSelector, action.timeoutMs)
       ?: error("Assert visible failed: ${action.nodeSelector.description()} not found within ${action.timeoutMs}ms")
+    // Present in the tree is not the same as visible to the user. An element completely buried
+    // under another window is one nobody can see, so passing an assert on it would certify
+    // something false — the failure mode an assertion exists to catch.
+    if ((node.driverDetail as? DriverNodeDetail.MacOsAx)?.occluded == true) {
+      error(
+        "Assert visible failed: ${action.nodeSelector.description()} exists but is hidden behind " +
+          "another window",
+      )
+    }
     val center = node.centerPoint()
     return ExecutionResult(center?.first, center?.second)
   }
@@ -120,6 +140,23 @@ class MacOsAxDeviceManager(
     error("Assert not visible failed: ${action.nodeSelector.description()} still visible after ${action.timeoutMs}ms")
   }
 
+  /**
+   * Chooses which node to act on when a selector matches more than one.
+   *
+   * A whole-desktop capture routinely surfaces the same label from several windows at once — two
+   * Finder windows both showing "Downloads", the same button in a background copy of an app. The
+   * resolver's blind `first()` could pick one the user can't see, and the tap would land on the
+   * window covering it. Prefer the first match that isn't occluded; fall back to the resolver's
+   * first when every match is covered (the tap gate in [executeTapOnElement] then refuses it),
+   * so single-app behavior — where nothing is ever occluded — is unchanged.
+   *
+   * Mirrors the Android accessibility driver's `pickPreferredMatch`, which does the same thing with
+   * `isVisibleToUser` for content behind a dialog.
+   */
+  private fun pickPreferredMatch(nodes: List<TrailblazeNode>): TrailblazeNode =
+    nodes.firstOrNull { (it.driverDetail as? DriverNodeDetail.MacOsAx)?.occluded == false }
+      ?: nodes.first()
+
   /** Polls a fresh capture until [selector] resolves (first match) or [timeoutMs] elapses. */
   private fun awaitSelector(
     selector: xyz.block.trailblaze.api.TrailblazeNodeSelector,
@@ -134,9 +171,9 @@ class MacOsAxDeviceManager(
           is TrailblazeNodeSelectorResolver.ResolveResult.MultipleMatches -> {
             Console.log(
               "[MacOsAxDeviceManager] selector '${selector.description()}' matched " +
-                "${result.nodes.size} elements — picking the first; refine to disambiguate",
+                "${result.nodes.size} elements — picking the first visible one; refine to disambiguate",
             )
-            return result.nodes.first()
+            return pickPreferredMatch(result.nodes)
           }
           is TrailblazeNodeSelectorResolver.ResolveResult.NoMatch -> Unit
         }

@@ -853,6 +853,15 @@ sealed interface DriverNodeDetail {
      * scope for v1 (see the plan's "out of scope" section).
      */
     val parameterizedAttributeNames: List<String> = emptyList(),
+
+    /**
+     * True when this element is entirely hidden behind a window stacked above its own — the
+     * desktop analog of an element under a modal. Computed geometrically from the window z-order
+     * (`MacOsAxOcclusion`); always false for a single-app capture, where there is nothing on top to
+     * hide behind. Honors [SnapshotDetail.OCCLUDED]: these are filtered out of the rendered tree by
+     * default, because an element the user can't see is an element the agent can't click.
+     */
+    val occluded: Boolean = false,
   ) : DriverNodeDetail {
 
     /** Convenience: the string payload of an attribute, or null if absent / not a [Str]. */
