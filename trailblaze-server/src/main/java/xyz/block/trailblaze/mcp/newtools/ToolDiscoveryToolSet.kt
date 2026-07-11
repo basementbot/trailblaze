@@ -54,6 +54,15 @@ class ToolDiscoveryToolSet(
   private val currentTargetProvider: () -> TrailblazeHostAppTarget? = { null },
   private val currentDriverTypeProvider: () -> TrailblazeDriverType? = { null },
   /**
+   * The driver the daemon is *configured* to use for a platform, consulted when nothing is
+   * currently connected. Discovery should list the tools that would actually run, and on a
+   * platform whose drivers expose disjoint tool sets the built-in default is simply a guess:
+   * DESKTOP defaults to Compose, so `toolbox --device desktop/<bundleId>` listed Compose tools
+   * for a macOS AX device — the `macos_*` tools it can actually run were nowhere to be seen,
+   * even though executing one worked fine. Returning null falls back to [resolveDefaultDriverType].
+   */
+  private val configuredDriverTypeProvider: (TrailblazeDevicePlatform) -> TrailblazeDriverType? = { null },
+  /**
    * Resource source used to discover `*.trailhead.yaml` / `*.shortcut.yaml` configs for role
    * enrichment. Injected by the host bootstrap when a workspace config dir is in play (so a
    * workspace-authored trailhead can appear in `trailheadTools`); falls back to the platform's
@@ -592,6 +601,7 @@ class ToolDiscoveryToolSet(
    * without preserving that distinction.
    */
   private fun resolveDefaultDriverType(platform: TrailblazeDevicePlatform): TrailblazeDriverType {
+    configuredDriverTypeProvider(platform)?.let { return it }
     return when (platform) {
       TrailblazeDevicePlatform.ANDROID -> TrailblazeDriverType.DEFAULT_ANDROID
       TrailblazeDevicePlatform.IOS -> TrailblazeDriverType.IOS_HOST

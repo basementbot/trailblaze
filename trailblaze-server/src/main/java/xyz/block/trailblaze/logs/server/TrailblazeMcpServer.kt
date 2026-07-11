@@ -1917,6 +1917,9 @@ class TrailblazeMcpServer(
           currentDriverTypeProvider = {
             mcpBridge.getDriverType()
           },
+          configuredDriverTypeProvider = { platform ->
+            mcpBridge.getConfiguredDriverType(platform)
+          },
           // resourceSourceProvider intentionally omitted — its default
           // `platformConfigResourceSource()` is workspace-aware, so workspace-authored
           // `*.trailhead.yaml` / `*.shortcut.yaml` files surface in role lists with no
