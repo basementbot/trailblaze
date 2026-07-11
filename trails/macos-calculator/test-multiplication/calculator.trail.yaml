@@ -1,0 +1,114 @@
+- config:
+    title: 'macOS Calculator: multiplication, verified at every step'
+    platform: desktop
+    driver: macos-ax
+- prompts:
+  - step: Open Calculator and start from a clean slate
+    recording:
+      tools:
+      - macos_launchApp:
+          bundleId: com.apple.Calculator
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXButton
+              identifier: Equals
+          timeoutMs: 10000
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: AllClear
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".?0"
+          timeoutMs: 5000
+
+  - step: Punch in 6 x 7 on the keypad and confirm the pending expression before committing to it
+    recording:
+      tools:
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Six
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Multiply
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Seven
+      # Assert the expression the calculator is ABOUT to evaluate, not just the answer — a wrong
+      # keypress that still lands on 42 (e.g. 40+2) would otherwise pass the final check silently.
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".*6.*×.*7.*"
+          timeoutMs: 5000
+
+  - step: Evaluate and verify the answer is 42
+    recording:
+      tools:
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Equals
+      # `.?` (not `.*`) so only the invisible LTR mark macOS prefixes to the display value may
+      # precede the digits. `.*42.*` would also be satisfied by 142 or 420.
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".?42"
+          timeoutMs: 5000
+
+  - step: Chain on the running result — multiply it by 2 and verify 84
+    recording:
+      tools:
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Multiply
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Two
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Equals
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".?84"
+          timeoutMs: 5000
+
+  - step: Do the same sum from the keyboard instead of the keypad — type 12*12 and hit Enter
+    recording:
+      tools:
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: AllClear
+      # Exercises the synthetic-CGEvent path rather than AXPress: the app is brought frontmost,
+      # then real keystrokes are posted. Calculator maps `*` to ×.
+      - macos_inputText:
+          text: "12*12"
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".*12.*×.*12.*"
+          timeoutMs: 5000
+      - macos_pressKey:
+          key: ENTER
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".?144"
+          timeoutMs: 5000

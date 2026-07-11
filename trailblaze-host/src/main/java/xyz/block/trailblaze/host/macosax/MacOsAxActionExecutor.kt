@@ -34,7 +34,9 @@ class MacOsAxActionExecutor(private val pid: Int) {
     is MacOsAxAction.InputText -> inputText(action.text)
     is MacOsAxAction.EraseText -> eraseText(action.characters)
     is MacOsAxAction.PressKey -> {
-      MacOsAxEventSynthesizer.pressKeyCode(action.keyCode); true
+      activateTargetApp()
+      MacOsAxEventSynthesizer.pressKeyCode(action.keyCode)
+      true
     }
     // Poll until the timeout so an assertion following a navigation/tap waits for the new content
     // to render (a page load, a screen transition) instead of checking once, too early, and failing.
@@ -100,11 +102,43 @@ class MacOsAxActionExecutor(private val pid: Int) {
   fun inputText(text: String): Boolean {
     val handled = withFocusedElement { el ->
       val existing = focusedStringValue(el) ?: ""
-      MacOsAxNative.setStringAttribute(el, "AXValue", existing + text)
+      val expected = existing + text
+      // Read back rather than trusting the setter's return code. `AXUIElementSetAttributeValue`
+      // reports success whenever the element ACCEPTS the message — not when the app honors it.
+      // Calculator's focused edit field and Safari's address bar both swallow `AXValue` writes
+      // this way, so a bare `setStringAttribute(...)` returns true, we skip the synthetic-HID
+      // fallback, and the text silently never appears. Confirming the value actually changed is
+      // the only reliable signal that the AX-native path worked.
+      MacOsAxNative.setStringAttribute(el, "AXValue", expected) && focusedStringValue(el) == expected
     }
     if (handled) return true
+    activateTargetApp()
     MacOsAxEventSynthesizer.typeText(text)
     return true
+  }
+
+  /**
+   * Brings the target app to the front and waits for the activation to land.
+   *
+   * `CGEventPost` posts to the HID event stream, which macOS delivers to whatever app is
+   * **frontmost** — not to [pid]. So a synthetic keystroke issued while another app has focus
+   * doesn't just fail to reach the target, it lands in that other app (the terminal that started
+   * the run, an editor, a chat window). Observed live: `macos_inputText text="12*12"` against
+   * Calculator left the display on `0` because the keys went to the foreground terminal instead.
+   *
+   * AX-native interaction ([MacOsAxNative.performAction], `AXValue` writes) addresses the element
+   * directly and works on background windows, which is why only the synthetic-HID paths need this.
+   * The short sleep is required: activation is asynchronous, and events posted in the same
+   * millisecond still reach the outgoing frontmost app.
+   */
+  private fun activateTargetApp() {
+    val app = MacOsAxNative.createApplication(pid)
+    try {
+      MacOsAxNative.setBooleanAttribute(app, "AXFrontmost", true)
+    } finally {
+      MacOsAxNative.release(app)
+    }
+    Thread.sleep(APP_ACTIVATION_SETTLE_MS)
   }
 
   /** Erases [characters] from the focused element's `AXValue` (AX-native), else synthetic delete. */
@@ -112,9 +146,12 @@ class MacOsAxActionExecutor(private val pid: Int) {
     val handled = withFocusedElement { el ->
       val existing = focusedStringValue(el) ?: return@withFocusedElement false
       val trimmed = existing.dropLast(characters.coerceAtMost(existing.length))
-      MacOsAxNative.setStringAttribute(el, "AXValue", trimmed)
+      // Read back for the same reason as [inputText] — a swallowed write must not be mistaken
+      // for a successful erase, or we skip the synthetic-delete fallback and erase nothing.
+      MacOsAxNative.setStringAttribute(el, "AXValue", trimmed) && focusedStringValue(el) == trimmed
     }
     if (handled) return true
+    activateTargetApp()
     MacOsAxEventSynthesizer.pressKeyCode(MacOsAxEventSynthesizer.KEY_CODE_DELETE, characters)
     return true
   }
@@ -181,5 +218,14 @@ class MacOsAxActionExecutor(private val pid: Int) {
   } catch (e: Exception) {
     System.err.println("[MacOsAxActionExecutor] shell ${args.firstOrNull()} failed: ${e.message}")
     false
+  }
+
+  companion object {
+    /**
+     * How long to wait after requesting `AXFrontmost` before posting synthetic HID events.
+     * Activation is handled asynchronously by the window server; posting immediately races it
+     * and the keystrokes still go to the app that was frontmost a moment ago.
+     */
+    private const val APP_ACTIVATION_SETTLE_MS = 250L
   }
 }

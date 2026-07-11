@@ -208,8 +208,9 @@ abstract class TrailblazeDesktopApp(
       // unified classifier slots) — so a unified web trail routes to the browser here the same
       // way the CLI routes it, instead of landing on whatever device happens to be listed first.
       val trailPlatforms = TrailDeviceSelector.supportedPlatformsForTrail(createTrailblazeYaml(), resolvedYaml)
-      val devices = deviceManager.loadDevicesSuspend(applyDriverFilter = false)
       val requestedDeviceId = request.deviceId?.takeIf { it.isNotBlank() }
+      val devices = deviceManager.loadDevicesSuspend(applyDriverFilter = false)
+        .withVirtualMacOsAxDevice(requestedDeviceId, trailDriverType)
       when (
         val resolution = CliRunDeviceResolver.resolve(devices, requestedDeviceId, trailDriverType, trailPlatforms)
       ) {
@@ -417,5 +418,35 @@ abstract class TrailblazeDesktopApp(
       deviceClassifiers = classifiers,
     )
   }
+}
 
+/**
+ * Appends the macOS AX device named by [requestedDeviceId] (`desktop/<bundleId>`) when this run
+ * targets the macOS AX driver and the device scan didn't already surface it.
+ *
+ * A macOS AX "device" is a running app addressed by bundle id, which no physical device scan can
+ * enumerate — the scan only reports the whole-desktop `MACOS_AX/all` entry. So resolving
+ * `--device desktop/com.apple.Calculator` against the scanned list alone always fails with
+ * "No connected device matches", even though the connect flow (`getConnectedMacOsAxDevice`) would
+ * happily launch/attach to that app. The CLI already synthesizes this device before its own
+ * resolve (see `TrailCommand.loadConnectedDevices`); the daemon's `/cli/run` path needs the same
+ * treatment, or a trail that runs fine in-process dies the moment it's delegated to the daemon.
+ *
+ * Appended rather than prepended so a genuinely-scanned device of the same id always wins.
+ */
+private fun List<xyz.block.trailblaze.devices.TrailblazeConnectedDeviceSummary>.withVirtualMacOsAxDevice(
+  requestedDeviceId: String?,
+  trailDriverType: TrailblazeDriverType?,
+): List<xyz.block.trailblaze.devices.TrailblazeConnectedDeviceSummary> {
+  if (trailDriverType != TrailblazeDriverType.MACOS_AX) return this
+  val bundleId = requestedDeviceId
+    ?.substringAfter("/", missingDelimiterValue = "")
+    ?.takeIf { it.isNotBlank() }
+    ?: return this
+  if (any { it.trailblazeDeviceId.instanceId == bundleId }) return this
+  return this + xyz.block.trailblaze.devices.TrailblazeConnectedDeviceSummary(
+    trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+    instanceId = bundleId,
+    description = "macOS app ($bundleId)",
+  )
 }

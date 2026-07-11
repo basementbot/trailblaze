@@ -1378,7 +1378,7 @@ class TrailblazeMcpBridgeImpl(
     // MACOS_AX driver: convert Maestro commands → MacOsAxActions → dispatch via the Apple
     // Accessibility APIs. Same shape as the IOS_AXE branch above (see docs/devlog/
     // 2026-07-10-macos-ax-driver.md).
-    if (trailblazeDeviceManager.getDeviceState(trailblazeDeviceId)?.device?.trailblazeDriverType == TrailblazeDriverType.MACOS_AX) {
+    if (isMacOsAxDevice(trailblazeDeviceId)) {
       val result = executeToolViaMacOsAx(tool, trailblazeDeviceId)
       cachedScreenStates.remove(trailblazeDeviceId.instanceId)
       return result
@@ -1531,6 +1531,25 @@ class TrailblazeMcpBridgeImpl(
 
   private fun axeSession(): TrailblazeSession =
     TrailblazeSession(sessionId = SessionId("axe"), startTime = Clock.System.now())
+
+  /**
+   * True when [trailblazeDeviceId] should be driven through the macOS Accessibility path.
+   *
+   * A macOS AX "device" is virtual — it names a running app by bundle id (`desktop/com.apple.Calculator`),
+   * which the physical device scan can't enumerate, so it never lands in the device-state map. That's
+   * exactly why [getConnectedDevice] synthesizes its summary. Routing therefore CANNOT key off
+   * `getDeviceState(...)`: that read is null for every macOS AX device, which silently sent
+   * `trailblaze tool …` calls down the Compose/host yaml path where they died as "Device not found"
+   * while the identical trail (whose `config: driver: macos-ax` populated `RunYamlRequest.driverType`)
+   * worked. Fall back to the configured DESKTOP driver — the same test the connect path uses at
+   * [getEffectiveDeviceId]'s `isVirtualMacOsAx` — so ad-hoc tool calls and trails route identically.
+   */
+  private fun isMacOsAxDevice(trailblazeDeviceId: TrailblazeDeviceId): Boolean {
+    val stateDriverType = trailblazeDeviceManager.getDeviceState(trailblazeDeviceId)?.device?.trailblazeDriverType
+    if (stateDriverType != null) return stateDriverType == TrailblazeDriverType.MACOS_AX
+    return trailblazeDeviceId.trailblazeDevicePlatform == TrailblazeDevicePlatform.DESKTOP &&
+      getConfiguredDriverType(TrailblazeDevicePlatform.DESKTOP) == TrailblazeDriverType.MACOS_AX
+  }
 
   /**
    * Routes an MCP tool call for a MACOS_AX-configured device to
