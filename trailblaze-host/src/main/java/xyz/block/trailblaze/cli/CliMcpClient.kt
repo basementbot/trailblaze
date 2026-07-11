@@ -998,10 +998,23 @@ class CliMcpClient(
     fun captureOrigin(args: Array<String>) {
       capturedOrigin = args
         .joinToString(" ")
+        // An HTTP header value is single-line: a CR/LF (or any control char) makes the client
+        // reject the request outright — "Header value '…' contains illegal character (code 10)".
+        // That's reachable from an ordinary invocation, because `trailblaze tool --yaml` carries a
+        // multi-line YAML body in argv. Worse, the failure surfaced as "Daemon connection failed",
+        // sending users to debug a daemon that was healthy and had never been contacted. The header
+        // is only sent when creating a session, so a multi-line `tool --yaml` failed as the FIRST
+        // command after a daemon restart and then "fixed itself" once any other command had opened
+        // a session to reuse. Flatten control chars (and the whitespace runs they leave) to spaces.
+        .replace(CONTROL_CHARS, " ")
+        .replace(WHITESPACE_RUN, " ")
         .trim()
         .take(200)
         .takeIf { it.isNotEmpty() }
     }
+
+    private val CONTROL_CHARS = Regex("\\p{Cntrl}+")
+    private val WHITESPACE_RUN = Regex("\\s+")
 
     private const val SESSION_FILE_PREFIX = "trailblaze-cli-session"
     private const val JSON_RPC_VERSION = "2.0"
