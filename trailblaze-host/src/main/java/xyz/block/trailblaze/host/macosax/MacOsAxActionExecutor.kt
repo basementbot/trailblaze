@@ -23,8 +23,24 @@ import java.util.concurrent.TimeUnit
  */
 class MacOsAxActionExecutor(private val pid: Int) {
 
-  /** Captures the current AX tree for the target app. */
-  fun captureTree(): TrailblazeNode = MacOsAxTreeWalker.capture(pid)
+  /**
+   * True when this executor targets the whole desktop (`--device desktop/all`) rather than one
+   * app. [MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID] carries no process, so its pid is 0.
+   */
+  private val wholeScreen: Boolean = pid == WHOLE_SCREEN_PID
+
+  /**
+   * Captures the AX tree the selectors resolve against: every on-screen app for the whole-desktop
+   * device, otherwise just the target app.
+   *
+   * Without the whole-screen branch, `desktop/all` captured `pid=0` — a single-app walk of a
+   * process that doesn't exist — so every selector resolved to nothing and acting on the desktop
+   * device failed with "Element not found" even though snapshotting it worked fine. (Taps were
+   * never the problem: [tapAt] goes through the system-wide element-at-position, so it's
+   * desktop-wide already.)
+   */
+  fun captureTree(): TrailblazeNode =
+    if (wholeScreen) MacOsAxTreeWalker.captureScreen() else MacOsAxTreeWalker.capture(pid)
 
   /** Dispatches [action]. Returns true on success. Tree is (re)captured lazily where needed. */
   fun execute(action: MacOsAxAction): Boolean = when (action) {
@@ -132,6 +148,12 @@ class MacOsAxActionExecutor(private val pid: Int) {
    * millisecond still reach the outgoing frontmost app.
    */
   private fun activateTargetApp() {
+    // The whole-desktop device has no single target app to bring forward, so keystrokes go to
+    // whatever the desktop currently has focused — which is the right semantic for it, and is how
+    // a person at the keyboard experiences the machine. A preceding tap is what moves focus: a
+    // synthetic click raises the window it lands on, so "click the field, then type" works across
+    // apps without this needing to guess an owner.
+    if (wholeScreen) return
     val app = MacOsAxNative.createApplication(pid)
     try {
       MacOsAxNative.setBooleanAttribute(app, "AXFrontmost", true)
@@ -221,6 +243,9 @@ class MacOsAxActionExecutor(private val pid: Int) {
   }
 
   companion object {
+    /** Sentinel pid for the whole-desktop device — it targets no single process. */
+    private const val WHOLE_SCREEN_PID = 0
+
     /**
      * How long to wait after requesting `AXFrontmost` before posting synthetic HID events.
      * Activation is handled asynchronously by the window server; posting immediately races it

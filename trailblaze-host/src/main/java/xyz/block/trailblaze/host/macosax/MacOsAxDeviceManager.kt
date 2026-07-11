@@ -42,8 +42,15 @@ class MacOsAxDeviceManager(
   )
 
   /** Fresh tree capture without waiting — used for selector-resolution loops. */
+  /**
+   * Delegates to [MacOsAxActionExecutor.captureTree] rather than walking the tree itself, so the
+   * app-vs-whole-desktop decision lives in exactly one place. When this duplicated
+   * `MacOsAxTreeWalker.capture(pid)`, teaching the executor about `desktop/all` wasn't enough:
+   * selectors resolve against *this* capture, so the whole-desktop device kept walking `pid=0` and
+   * every selector missed while snapshots of the same device looked perfect.
+   */
   fun captureTree(): TrailblazeNode? = try {
-    MacOsAxTreeWalker.capture(pid)
+    executor.captureTree()
   } catch (e: Exception) {
     Console.log("[MacOsAxDeviceManager] AX capture failed: ${e.message}")
     null
