@@ -998,13 +998,12 @@ class TrailblazeDeviceManager(
               description = "macOS Desktop (active app)",
             )
           )
-          add(
-            TrailblazeConnectedDeviceSummary(
-              trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
-              instanceId = xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID,
-              description = "macOS Desktop (all windows — slower)",
-            )
-          )
+          // `desktop/all` is deliberately NOT listed as a second device, only addressable as one.
+          // Listing it made the macOS platform ambiguous, and every command that resolves a device
+          // WITHOUT --device broke on it: `trailblaze session end` started failing with "multiple
+          // devices connected — pick one", which meant sessions silently never ended and recorded
+          // steps leaked from one session into the next trail. A capture SCOPE is not a second
+          // machine; offering it as one made the tool lie about how many devices you have.
         }
 
         // Playwright-electron — only show if CDP endpoint is responding.

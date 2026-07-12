@@ -538,6 +538,7 @@ class StepToolSet(
       )
 
       // Record the step (success or failure)
+      sessionContext?.scopeRecordingTo(sessionIdProvider?.invoke())
       sessionContext?.recordStep(
         RecordedStep(
           type = if (isVerify) RecordedStepType.VERIFY else RecordedStepType.STEP,
@@ -789,7 +790,9 @@ class StepToolSet(
         Console.log("│ ✗ Failed: ${wrapper.name} — ${e.message}")
         Console.log("└──────────────────────────────────────────────────────────────────────────────")
         emitObjectiveComplete(promptStep, stepStartTime, success = false, failureReason = "Tool ${wrapper.name} failed: ${e.message}")
-        sessionContext?.recordStep(RecordedStep(
+        sessionContext?.scopeRecordingTo(sessionIdProvider?.invoke())
+        sessionContext?.scopeRecordingTo(sessionIdProvider?.invoke())
+    sessionContext?.recordStep(RecordedStep(
           type = RecordedStepType.STEP,
           input = objective,
           toolCalls = recordedToolCalls,
@@ -818,6 +821,7 @@ class StepToolSet(
     val combinedOutput = renderDirectToolOutputs(toolOutputs)
 
     emitObjectiveComplete(promptStep, stepStartTime, success = true)
+    sessionContext?.scopeRecordingTo(sessionIdProvider?.invoke())
     sessionContext?.recordStep(RecordedStep(
       type = RecordedStepType.STEP,
       input = objective,

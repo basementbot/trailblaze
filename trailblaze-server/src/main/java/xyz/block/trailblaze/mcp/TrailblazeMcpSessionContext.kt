@@ -1,5 +1,6 @@
 package xyz.block.trailblaze.mcp
 
+import xyz.block.trailblaze.logs.model.SessionId
 import io.modelcontextprotocol.kotlin.sdk.server.ServerSession
 import io.modelcontextprotocol.kotlin.sdk.types.LoggingLevel
 import io.modelcontextprotocol.kotlin.sdk.types.LoggingMessageNotification
@@ -411,7 +412,38 @@ class TrailblazeMcpSessionContext(
     currentTrailName = null
     isRecording = false
     recordedSteps.clear()
+    recordingSessionId = null
     Console.log("[Recording] Cleared")
+  }
+
+  /** The Trailblaze session the buffered steps belong to. See [scopeRecordingTo]. */
+  private var recordingSessionId: SessionId? = null
+
+  /**
+   * Binds the recording buffer to [sessionId], discarding anything recorded under a DIFFERENT one.
+   *
+   * The buffer lives on the MCP session context, which outlives any single Trailblaze session — so
+   * steps from a finished session could still be sitting in it when the next one started, and
+   * `session save` would happily write them into the new trail. It did: a saved trail began with a
+   * step from an earlier, unrelated session, and replaying it failed, because that phantom step
+   * tapped a button in an app the trail hadn't launched yet. A recording that contains something
+   * you didn't do is worse than no recording — you'd trust it.
+   *
+   * `session end` does clear the buffer, but relying on that means relying on every future path
+   * that starts a session remembering to. Keying the buffer to its session makes the leak
+   * impossible rather than merely unlikely.
+   */
+  fun scopeRecordingTo(sessionId: SessionId?) = synchronized(recordingLock) {
+    if (sessionId == null) return@synchronized
+    val previous = recordingSessionId
+    if (previous != null && previous != sessionId && recordedSteps.isNotEmpty()) {
+      Console.log(
+        "[Recording] Session changed ($previous -> $sessionId) — discarding ${recordedSteps.size} " +
+          "step(s) recorded under the previous session so they can't leak into this trail",
+      )
+      recordedSteps.clear()
+    }
+    recordingSessionId = sessionId
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
