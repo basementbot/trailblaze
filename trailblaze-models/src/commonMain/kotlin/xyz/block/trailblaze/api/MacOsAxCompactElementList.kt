@@ -128,9 +128,7 @@ object MacOsAxCompactElementList {
       else -> null
     }
 
-    val shouldEmit = descriptor != null && (
-      detail.hasIdentifiableProperties || role != null || includeAllElements
-    )
+    val shouldEmit = descriptor != null && (includeAllElements || isMeaningful(detail, composite))
 
     if (shouldEmit) {
       val indent = "  ".repeat(depth)
@@ -158,6 +156,41 @@ object MacOsAxCompactElementList {
       }
     }
   }
+
+  /**
+   * Whether an element earns a line in the default listing — the macOS counterpart of
+   * [AndroidCompactElementList]'s `isMeaningful`, and the gate [SnapshotDetail.ALL_ELEMENTS]
+   * exists to bypass.
+   *
+   * The point of the default view is what the agent can actually act on, so a bare layout
+   * container is noise. The previous condition (`hasIdentifiableProperties || role != null`) could
+   * never drop anything: every AX element reports an `AXRole`, so `role != null` is always true and
+   * ALL_ELEMENTS had nothing to bypass — the "trim to what's interactable" contract every other
+   * driver honors was silently a no-op here, and a Calculator snapshot listed its `AXSplitGroup`
+   * and `AXHostingView` scaffolding alongside its buttons.
+   *
+   * Kept, in the same spirit as Android's list:
+   *  - interactive elements — [DriverNodeDetail.MacOsAx.isInteractive] (advertises `AXPress` and
+   *    friends, or is one of the native control roles),
+   *  - anything carrying readable content (an `AXTitle` / `AXValue` / `AXDescription`), which is
+   *    what assertions match against and what names a window or app,
+   *  - anything with an identifying attribute (`AXIdentifier`), since that's what selectors target,
+   *  - the focused and selected elements, which describe current state even when inert.
+   *
+   * Structural nodes that survive none of these are skipped, and the walk recurses through them at
+   * the same depth, so their children keep their place in the hierarchy.
+   */
+  private fun isMeaningful(detail: DriverNodeDetail.MacOsAx, label: String?): Boolean {
+    if (detail.isInteractive) return true
+    if (label != null) return true
+    if (detail.hasIdentifiableProperties) return true
+    if (detail.isTrue("AXFocused") || detail.isTrue("AXSelected")) return true
+    return false
+  }
+
+  /** True when [name] is a boolean AX attribute that's currently set. */
+  private fun DriverNodeDetail.MacOsAx.isTrue(name: String): Boolean =
+    (attributes[name] as? MacOsAxAttributeValue.Bool)?.value == true
 
   /**
    * Counts the identifiable elements inside a pruned occluded subtree, so the "N elements hidden
