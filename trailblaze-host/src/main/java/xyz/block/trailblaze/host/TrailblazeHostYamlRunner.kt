@@ -719,11 +719,21 @@ object TrailblazeHostYamlRunner {
           "disabling auto-lock for the run) and try again.",
       )
     }
-    val pid = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.ensureRunning(bundleId)
-      ?: throw TrailblazeException(
-        "Could not launch or attach to macOS app '$bundleId'. Check the bundle id and that this " +
-          "process has the Accessibility permission (System Settings → Privacy & Security → Accessibility).",
-      )
+    // `desktop/all` is the whole-desktop device: it names every on-screen app rather than one, so
+    // there is no bundle id to launch and no single pid to attach to (0 is the sentinel the walker
+    // reads as "walk every app"). Without this, a trail on the whole-desktop device tried to launch
+    // an app literally called "all" and died — the MCP tool path already understood the sentinel,
+    // so the same trail that worked call-by-call failed the moment it was run as a trail.
+    val wholeScreen = bundleId == xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID
+    val pid = if (wholeScreen) {
+      0
+    } else {
+      xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.ensureRunning(bundleId)
+        ?: throw TrailblazeException(
+          "Could not launch or attach to macOS app '$bundleId'. Check the bundle id and that this " +
+            "process has the Accessibility permission (System Settings → Privacy & Security → Accessibility).",
+        )
+    }
     if (!xyz.block.trailblaze.host.macosax.MacOsAxNative.isProcessTrusted()) {
       throw TrailblazeException(
         "This process is not Accessibility-trusted; grant it in System Settings → Privacy & " +
@@ -734,7 +744,7 @@ object TrailblazeHostYamlRunner {
     // window to appear (re-activating each poll) so the first selector doesn't miss the UI. Best
     // effort: proceed after the deadline even if none appears (some apps are legitimately
     // windowless / menu-bar-only).
-    run {
+    if (!wholeScreen) {
       val deadline = System.currentTimeMillis() + 8_000
       while (System.currentTimeMillis() < deadline) {
         xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.activate(bundleId)
@@ -743,7 +753,11 @@ object TrailblazeHostYamlRunner {
       }
     }
     val display = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.mainDisplaySize()
-    onProgressMessage("Attached to '$bundleId' (pid=$pid, windows=${xyz.block.trailblaze.host.macosax.MacOsAxNative.windowCount(pid)})")
+    if (wholeScreen) {
+      onProgressMessage("Attached to the whole desktop (every on-screen app)")
+    } else {
+      onProgressMessage("Attached to '$bundleId' (pid=$pid, windows=${xyz.block.trailblaze.host.macosax.MacOsAxNative.windowCount(pid)})")
+    }
 
     val macDeviceManager = xyz.block.trailblaze.host.macosax.MacOsAxDeviceManager(
       pid = pid,
@@ -769,6 +783,7 @@ object TrailblazeHostYamlRunner {
     val macOsToolClasses = setOf(
       xyz.block.trailblaze.host.macosax.tools.MacOsLaunchAppTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsTapOnElementTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsTapPointTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsInputTextTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsPressKeyTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsAssertVisibleTrailblazeTool::class,
