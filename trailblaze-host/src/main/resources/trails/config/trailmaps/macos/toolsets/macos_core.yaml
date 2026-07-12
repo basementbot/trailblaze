@@ -11,5 +11,7 @@ tools:
   - macos_tapPoint
   - macos_inputText
   - macos_pressKey
+  - macos_pressKeyCombo
+  - macos_activateApp
   - macos_assertVisible
   - macos_openUrl

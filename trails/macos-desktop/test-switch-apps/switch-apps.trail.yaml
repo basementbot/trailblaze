@@ -1,0 +1,99 @@
+- config:
+    title: 'Work in one app, switch to another, come back'
+    platform: desktop
+    driver: macos-ax
+# Runs on the whole-desktop device (`--device desktop/all`) — the whole point is that one session
+# moves between applications, which a single-app device cannot do.
+- prompts:
+  - step: Do some arithmetic in Calculator
+    recording:
+      tools:
+      - macos_launchApp:
+          bundleId: com.apple.Calculator
+      # Bring it to the front before typing or pressing anything: keystrokes and shortcuts go to
+      # whatever app is FRONTMOST, not to the app a selector last matched.
+      - macos_activateApp:
+          bundleId: com.apple.Calculator
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: AllClear
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Eight
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Multiply
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Eight
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: Equals
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".?64"
+          timeoutMs: 30000
+
+  - step: Switch to the browser and open a page
+    recording:
+      tools:
+      - macos_openUrl:
+          url: https://handstandsam.com
+          browserBundleId: com.google.Chrome
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXWindow
+              titleRegex: ".*Handstand Sam.*"
+          timeoutMs: 40000
+
+  - step: Drive the browser with keyboard shortcuts alone
+    recording:
+      tools:
+      # COMMAND+T / COMMAND+W reach what no selector can: Chrome's tab strip exposes no element to
+      # click for "new tab" in any way a trail can rely on, and an enormous amount of macOS is like
+      # this. The chord holds the modifier down as a real event rather than just stamping the
+      # command bit onto the key — see MacOsAxEventSynthesizer.pressChord.
+      - macos_pressKeyCombo:
+          key: T
+          modifiers: [COMMAND]
+      # Proof the shortcut landed, and proof the assertion isn't vacuous: the front window is a
+      # DIFFERENT window than the one before, and it says so.
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXWindow
+              titleRegex: ".*New Tab.*"
+          timeoutMs: 20000
+      - macos_pressKeyCombo:
+          key: W
+          modifiers: [COMMAND]
+      # ...and closing it puts the original page back in front.
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXWindow
+              titleRegex: ".*Handstand Sam.*"
+          timeoutMs: 20000
+
+  - step: Switch back to Calculator and confirm our work is still there
+    recording:
+      tools:
+      # macos_activateApp names the app it wants. COMMAND+TAB also works (the driver can press it),
+      # but the app switcher walks apps in most-recently-used order, so where it lands depends on
+      # history a trail can't see — fine for a human, useless as a test step.
+      - macos_activateApp:
+          bundleId: com.apple.Calculator
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: ".?64"
+          timeoutMs: 30000

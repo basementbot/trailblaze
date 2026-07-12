@@ -786,6 +786,8 @@ object TrailblazeHostYamlRunner {
       xyz.block.trailblaze.host.macosax.tools.MacOsTapPointTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsInputTextTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsPressKeyTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsPressKeyComboTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsActivateAppTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsAssertVisibleTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsOpenUrlTrailblazeTool::class,
     )

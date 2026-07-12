@@ -28,6 +28,9 @@ object MacOsAxEventSynthesizer {
   // CGEventTapLocation
   private const val K_CG_HID_EVENT_TAP = 0
 
+  /** `kCGEventFlagsChanged` — the event type macOS uses to report a modifier key going down/up. */
+  private const val K_CG_EVENT_FLAGS_CHANGED = 12
+
   // CGScrollEventUnit
   private const val K_CG_SCROLL_EVENT_UNIT_PIXEL = 0
 
@@ -45,6 +48,7 @@ object MacOsAxEventSynthesizer {
   private val cgEventKeyboardSetUnicodeString by lazy { cg.getFunction("CGEventKeyboardSetUnicodeString") }
   private val cgEventPost by lazy { cg.getFunction("CGEventPost") }
   private val cgEventSetFlags by lazy { cg.getFunction("CGEventSetFlags") }
+  private val cgEventSetType by lazy { cg.getFunction("CGEventSetType") }
   private val cgWarpMouseCursorPosition by lazy { cg.getFunction("CGWarpMouseCursorPosition") }
   private val cfRelease by lazy { cf.getFunction("CFRelease") }
 
@@ -130,6 +134,114 @@ object MacOsAxEventSynthesizer {
 
   /** `kCGEventFlagMaskCommand` — the ⌘ modifier flag for [pressKeyCombo]. */
   const val FLAG_COMMAND = 0x100000L
+
+  /** `kCGEventFlagMaskShift` — ⇧. */
+  const val FLAG_SHIFT = 0x20000L
+
+  /** `kCGEventFlagMaskAlternate` — ⌥ (Option/Alt). */
+  const val FLAG_OPTION = 0x80000L
+
+  /** `kCGEventFlagMaskControl` — ⌃. */
+  const val FLAG_CONTROL = 0x40000L
+
+  /**
+   * Virtual key codes by name (`kVK_*`, Carbon HIToolbox `Events.h`), for chords like ⌘W / ⌘T /
+   * ⌘⇧[ that the driver otherwise has no way to express.
+   *
+   * These are **positional**, not character codes — 0 is the key where "A" sits on a US ANSI
+   * layout, which is why the numbers look arbitrary (A=0, S=1, D=2 …). They address a physical
+   * key, so a chord means the same thing regardless of the user's keyboard layout, which is
+   * exactly what you want for a shortcut like ⌘W.
+   */
+  val KEY_CODES: Map<String, Int> = mapOf(
+    "A" to 0, "S" to 1, "D" to 2, "F" to 3, "H" to 4, "G" to 5, "Z" to 6, "X" to 7, "C" to 8,
+    "V" to 9, "B" to 11, "Q" to 12, "W" to 13, "E" to 14, "R" to 15, "Y" to 16, "T" to 17,
+    "O" to 31, "U" to 32, "I" to 34, "P" to 35, "L" to 37, "J" to 38, "K" to 40, "N" to 45,
+    "M" to 46,
+    "1" to 18, "2" to 19, "3" to 20, "4" to 21, "5" to 23, "6" to 22, "7" to 26, "8" to 28,
+    "9" to 25, "0" to 29,
+    "EQUAL" to 24, "MINUS" to 27, "LEFTBRACKET" to 33, "RIGHTBRACKET" to 30, "QUOTE" to 39,
+    "SEMICOLON" to 41, "BACKSLASH" to 42, "COMMA" to 43, "SLASH" to 44, "PERIOD" to 47,
+    "GRAVE" to 50,
+    "RETURN" to KEY_CODE_RETURN, "ENTER" to KEY_CODE_RETURN, "TAB" to KEY_CODE_TAB,
+    "SPACE" to 49, "DELETE" to KEY_CODE_DELETE, "BACKSPACE" to KEY_CODE_DELETE,
+    "ESCAPE" to KEY_CODE_ESCAPE, "HOME" to KEY_CODE_HOME, "END" to 119,
+    "PAGEUP" to 116, "PAGEDOWN" to 121,
+    "LEFT" to 123, "RIGHT" to 124, "DOWN" to 125, "UP" to 126,
+  )
+
+  /**
+   * Presses a chord while **holding** the modifiers down as real events, rather than merely
+   * stamping the modifier bits onto the key event.
+   *
+   * ⌘Tab is why this exists. macOS's application switcher is driven by the WindowServer, which
+   * watches for the Command key going down and coming back up: it opens the switcher on ⌘-down,
+   * advances on each Tab, and commits the selection when ⌘ is *released*. A key event that merely
+   * carries the command flag never announces a ⌘-down, so the switcher never opens and the
+   * keystroke is dropped. Emitting explicit flagsChanged events for the modifiers — press, chord,
+   * release — is what makes it behave like a real hand on a real keyboard.
+   *
+   * Plain shortcuts (⌘W, ⌘T) work either way; they're just handled by the focused app, which only
+   * reads the flags on the key event. This path is correct for both, so it's the one used.
+   */
+  fun pressChord(keyCode: Int, modifierKeyCodes: List<Int>, flags: Long, repeats: Int = 1) {
+    modifierKeyCodes.forEachIndexed { i, mod ->
+      // Flags accumulate as each modifier goes down, mirroring a real keyboard.
+      postFlagsChanged(mod, flagsFor(modifierKeyCodes.take(i + 1)))
+    }
+    try {
+      repeat(repeats) {
+        postKeyCode(keyCode, keyDown = true, flags = flags)
+        postKeyCode(keyCode, keyDown = false, flags = flags)
+      }
+    } finally {
+      // Release in reverse, shedding each modifier's flag as it comes up. In a finally block
+      // because a modifier left stuck down would poison every subsequent keystroke on the machine
+      // — including the user's own typing, long after the run ended.
+      modifierKeyCodes.reversed().forEachIndexed { i, mod ->
+        val stillHeld = modifierKeyCodes.take(modifierKeyCodes.size - i - 1)
+        postFlagsChanged(mod, flagsFor(stillHeld))
+      }
+    }
+  }
+
+  /** Virtual key codes for the modifier keys themselves (needed to press/release them). */
+  private const val KEY_CODE_COMMAND = 55
+  private const val KEY_CODE_SHIFT = 56
+  private const val KEY_CODE_OPTION = 58
+  private const val KEY_CODE_CONTROL = 59
+
+  /** The modifier key code that carries [flag], for the flagsChanged events in [pressChord]. */
+  fun modifierKeyCodeFor(flag: Long): Int = when (flag) {
+    FLAG_COMMAND -> KEY_CODE_COMMAND
+    FLAG_SHIFT -> KEY_CODE_SHIFT
+    FLAG_OPTION -> KEY_CODE_OPTION
+    else -> KEY_CODE_CONTROL
+  }
+
+  private fun flagsFor(modifierKeyCodes: List<Int>): Long = modifierKeyCodes.fold(0L) { acc, code ->
+    acc or when (code) {
+      KEY_CODE_COMMAND -> FLAG_COMMAND
+      KEY_CODE_SHIFT -> FLAG_SHIFT
+      KEY_CODE_OPTION -> FLAG_OPTION
+      else -> FLAG_CONTROL
+    }
+  }
+
+  /** Posts a `flagsChanged` event — how macOS learns a modifier key itself went down or up. */
+  private fun postFlagsChanged(keyCode: Int, flags: Long) {
+    val event = cgEventCreateKeyboardEvent.invokePointer(
+      arrayOf(Pointer.NULL, keyCode.toShort(), 1),
+    )
+    if (event == null || event == Pointer.NULL) return
+    try {
+      cgEventSetType.invokeVoid(arrayOf(event, K_CG_EVENT_FLAGS_CHANGED))
+      cgEventSetFlags.invokeVoid(arrayOf(event, flags))
+      cgEventPost.invokeVoid(arrayOf(K_CG_HID_EVENT_TAP, event))
+    } finally {
+      cfRelease.invokeVoid(arrayOf(event))
+    }
+  }
 
   /** Posts [times] key down+up pairs for the given virtual [keyCode] (e.g. [KEY_CODE_DELETE]). */
   fun pressKeyCode(keyCode: Int, times: Int = 1) {

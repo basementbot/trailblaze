@@ -4,6 +4,7 @@ import ai.koog.agents.core.tools.annotations.LLMDescription
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import maestro.KeyCode
+import xyz.block.trailblaze.host.macosax.MacOsAxEventSynthesizer
 import maestro.orchestra.Command
 import maestro.orchestra.InputTextCommand
 import maestro.orchestra.LaunchAppCommand
@@ -126,6 +127,103 @@ data class MacOsTapPointTrailblazeTool(
 ) : MapsToMaestroCommands() {
   override fun toMaestroCommands(memory: AgentMemory): List<Command> =
     listOf(TapOnPointCommand(x = x, y = y))
+}
+
+/** Modifier keys that can be held for a [MacOsPressKeyComboTrailblazeTool] chord. */
+@Serializable
+enum class MacOsModifier {
+  COMMAND,
+  SHIFT,
+  OPTION,
+  CONTROL,
+  ;
+
+  fun toFlag(): Long = when (this) {
+    COMMAND -> MacOsAxEventSynthesizer.FLAG_COMMAND
+    SHIFT -> MacOsAxEventSynthesizer.FLAG_SHIFT
+    OPTION -> MacOsAxEventSynthesizer.FLAG_OPTION
+    CONTROL -> MacOsAxEventSynthesizer.FLAG_CONTROL
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_pressKeyCombo")
+@LLMDescription(
+  "Press a keyboard shortcut — a key plus held modifiers — on whatever app is frontmost. " +
+    "This is how you reach the enormous amount of macOS that has no clickable control at all: " +
+    "close a window (COMMAND+W), new tab (COMMAND+T), switch app (COMMAND+TAB), quit " +
+    "(COMMAND+Q), save (COMMAND+S), select all (COMMAND+A). " +
+    "`key` is a key NAME, not a character: a letter A-Z, a digit, or one of TAB, SPACE, RETURN, " +
+    "ESCAPE, DELETE, LEFT, RIGHT, UP, DOWN, HOME, END, PAGEUP, PAGEDOWN, COMMA, PERIOD, MINUS, " +
+    "EQUAL, LEFTBRACKET, RIGHTBRACKET, QUOTE, SEMICOLON, SLASH, BACKSLASH, GRAVE. " +
+    "Shortcuts go to the FRONTMOST app, so bring the app you mean to the front first " +
+    "(macos_activateApp) — otherwise COMMAND+W closes someone else's window."
+)
+data class MacOsPressKeyComboTrailblazeTool(
+  @param:LLMDescription("Key name, e.g. W, T, TAB, LEFT, RETURN. Not a character — 'W', not 'w'.")
+  val key: String,
+  @param:LLMDescription("Modifiers to hold, e.g. [COMMAND] for COMMAND+W, or [COMMAND, SHIFT] for COMMAND+SHIFT+T.")
+  val modifiers: List<MacOsModifier> = emptyList(),
+  @param:LLMDescription("How many times to press the chord. Defaults to 1. COMMAND+TAB twice moves two apps along.")
+  val repeats: Int = 1,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    val keyCode = MacOsAxEventSynthesizer.KEY_CODES[key.trim().uppercase()]
+      ?: return TrailblazeToolResult.Error.ExceptionThrown(
+        "Unknown key '$key'. Use a key NAME — a letter, a digit, or one of: " +
+          MacOsAxEventSynthesizer.KEY_CODES.keys.sorted().joinToString(", "),
+      )
+    if (repeats < 1) {
+      return TrailblazeToolResult.Error.ExceptionThrown("repeats must be at least 1, got $repeats.")
+    }
+    val flags = modifiers.fold(0L) { acc, m -> acc or m.toFlag() }
+    val modifierKeyCodes = modifiers.map { MacOsAxEventSynthesizer.modifierKeyCodeFor(it.toFlag()) }
+    MacOsAxEventSynthesizer.pressChord(keyCode, modifierKeyCodes, flags, repeats)
+    // The frontmost app / the window server needs a beat to act on the chord before the next tool
+    // reads the screen — a ⌘W that has closed nothing yet reads as a no-op.
+    delay(CHORD_SETTLE_MS)
+    val chord = (modifiers.map { it.name } + key.uppercase()).joinToString("+")
+    return TrailblazeToolResult.Success(message = "Pressed $chord${if (repeats > 1) " x$repeats" else ""}")
+  }
+
+  companion object {
+    private const val CHORD_SETTLE_MS = 400L
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_activateApp")
+@LLMDescription(
+  "Bring an already-running app to the front by bundle id — the reliable way to switch apps. " +
+    "Prefer this over COMMAND+TAB: the app switcher moves through apps in most-recently-used " +
+    "order, so which app you land on depends on history the trail can't see, whereas this names " +
+    "the app you actually want. Use it before typing or pressing a shortcut, since both go to " +
+    "whatever is frontmost."
+)
+data class MacOsActivateAppTrailblazeTool(
+  @param:LLMDescription("Bundle id of the app to bring to the front, e.g. com.apple.Safari.")
+  val bundleId: String,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    val activated = MacOsAxAppResolver.activate(bundleId)
+    if (!activated) {
+      return TrailblazeToolResult.Error.ExceptionThrown(
+        "Could not activate '$bundleId' — is it running? Use macos_launchApp to start it.",
+      )
+    }
+    // Activation is asynchronous: the window server raises the app on its own schedule, and a tool
+    // that reads the screen (or types) in the same millisecond still sees the outgoing app.
+    delay(ACTIVATION_SETTLE_MS)
+    return TrailblazeToolResult.Success(message = "Activated $bundleId")
+  }
+
+  companion object {
+    private const val ACTIVATION_SETTLE_MS = 600L
+  }
 }
 
 @Serializable
