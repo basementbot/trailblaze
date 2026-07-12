@@ -69,7 +69,16 @@ object MacOsAxTreeWalker {
    */
   fun captureScreen(): TrailblazeNode {
     val counter = NodeIdCounter()
-    val appTrees = MacOsAxNative.onScreenAppPids().mapNotNull { app ->
+    // Walked in parallel, one task per app. Every AX read is a blocking cross-process round trip —
+    // the walk spends its time *waiting* on other processes, not computing — so walking nine apps
+    // one after another serialized nine independent waits for no reason. A parallel stream turns
+    // the wall-clock cost into roughly the slowest single app (a browser with a big page) instead
+    // of the sum of all of them. The AX API is safe to call off the main thread, and the only
+    // shared state is the atomic id counter.
+    //
+    // Order is preserved: CGWindowList hands back the apps front-to-back, and that ordering IS the
+    // z-order the occlusion pass depends on, so the collector must not reshuffle them.
+    val appTrees = MacOsAxNative.onScreenAppPids().parallelStream().map { app ->
       val element = MacOsAxNative.createApplication(app.pid)
       try {
         // Opt browsers into exposing their web-content AX tree (see capture()).
@@ -82,11 +91,13 @@ object MacOsAxTreeWalker {
       } finally {
         MacOsAxNative.release(element)
       }
-    }
+    }.toList().filterNotNull()
+    // Read once, not once per app: it's the same front-to-back window list for the whole capture.
+    val onScreenWindows = MacOsAxNative.onScreenWindows()
     return TrailblazeNode(
       nodeId = counter.next(),
       bounds = null,
-      children = appTrees.map { markOccluded(it, MacOsAxNative.onScreenWindows()) },
+      children = appTrees.map { markOccluded(it, onScreenWindows) },
       driverDetail = DriverNodeDetail.MacOsAx(
         pid = 0,
         // Synthetic assembly root (not a real AX element) — a stable container for the per-app
@@ -101,9 +112,14 @@ object MacOsAxTreeWalker {
     )
   }
 
+  /**
+   * Atomic because [captureScreen] walks the on-screen apps in parallel and they share one counter —
+   * node ids must stay unique across the merged tree (hit-testing, ref generation and index paths
+   * all key off them, so a collision is a silently wrong element, not a crash).
+   */
   private class NodeIdCounter {
-    private var next = 0L
-    fun next(): Long = next++
+    private val next = java.util.concurrent.atomic.AtomicLong(0)
+    fun next(): Long = next.getAndIncrement()
   }
 
   /**
@@ -120,17 +136,16 @@ object MacOsAxTreeWalker {
     val nodeId = counter.next()
 
     // Every attribute name → decoded value, except AXChildren (drives structure below).
-    val attributes = LinkedHashMap<String, MacOsAxAttributeValue>()
-    val attributeNames = MacOsAxNative.attributeNames(element)
-    for (name in attributeNames) {
-      if (name == CHILDREN_ATTRIBUTE) continue
-      val ref = MacOsAxNative.copyAttributeValue(element, name) ?: continue
-      try {
-        attributes[name] = MacOsAxNative.decodeValue(ref)
-      } finally {
-        MacOsAxNative.release(ref)
-      }
-    }
+    //
+    // Read in ONE batched cross-process call. Reading them one at a time cost `1 + N` round trips
+    // per element (~30), which across a whole-desktop capture is >150,000 trips and took ~25s —
+    // paid again on every selector poll. Same attributes, same fidelity, an order of magnitude
+    // fewer trips. Falls back to the per-attribute path if the batch call fails outright, so a
+    // refusing element degrades to slow rather than to empty.
+    val wanted = MacOsAxNative.attributeNames(element).filterNot { it == CHILDREN_ATTRIBUTE }
+    val attributes: Map<String, MacOsAxAttributeValue> =
+      MacOsAxNative.copyMultipleAttributeValues(element, wanted)
+        ?: readAttributesIndividually(element, wanted)
 
     val detail = DriverNodeDetail.MacOsAx(
       pid = MacOsAxNative.pidOf(element) ?: -1,
@@ -153,6 +168,23 @@ object MacOsAxTreeWalker {
       children = children,
       driverDetail = detail,
     )
+  }
+
+  /** One `AXUIElementCopyAttributeValue` per attribute — the fallback when the batch read fails. */
+  private fun readAttributesIndividually(
+    element: Pointer,
+    names: List<String>,
+  ): Map<String, MacOsAxAttributeValue> {
+    val attributes = LinkedHashMap<String, MacOsAxAttributeValue>()
+    for (name in names) {
+      val ref = MacOsAxNative.copyAttributeValue(element, name) ?: continue
+      try {
+        attributes[name] = MacOsAxNative.decodeValue(ref)
+      } finally {
+        MacOsAxNative.release(ref)
+      }
+    }
+    return attributes
   }
 
   private fun captureChildren(

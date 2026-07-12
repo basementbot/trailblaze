@@ -1,6 +1,7 @@
 package xyz.block.trailblaze.host.macosax
 
 import com.sun.jna.Memory
+import com.sun.jna.Native
 import com.sun.jna.NativeLibrary
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
@@ -31,6 +32,12 @@ object MacOsAxNative {
   private const val K_AX_VALUE_CG_SIZE = 2
   private const val K_AX_VALUE_CG_RECT = 3
   private const val K_AX_VALUE_CF_RANGE = 4
+
+  /**
+   * `kAXValueAXErrorType` — the placeholder `AXUIElementCopyMultipleAttributeValues` puts in a slot
+   * whose attribute could not be read. In-band, not omitted, so it has to be filtered explicitly.
+   */
+  private const val K_AX_VALUE_AX_ERROR = 5
 
   // CFNumberType (CoreFoundation/CFNumber.h) — read every CFNumber as a double for fidelity.
   private const val K_CF_NUMBER_DOUBLE_TYPE = 13
@@ -65,6 +72,9 @@ object MacOsAxNative {
   private val cfBooleanGetValue by lazy { cf.getFunction("CFBooleanGetValue") }
   private val cfEqual by lazy { cf.getFunction("CFEqual") }
   private val cfDictionaryGetValue by lazy { cf.getFunction("CFDictionaryGetValue") }
+  private val cfArrayCreate by lazy { cf.getFunction("CFArrayCreate") }
+  private val kCFTypeArrayCallBacks by lazy { cf.getGlobalVariableAddress("kCFTypeArrayCallBacks") }
+  private val nullTypeId by lazy { cf.getFunction("CFNullGetTypeID").invokeLong(arrayOf<Any>()) }
 
   // --- CoreGraphics window-list (for whole-screen capture: which apps own on-screen windows) ---
   private val cg: NativeLibrary by lazy {
@@ -88,6 +98,9 @@ object MacOsAxNative {
   private val axUIElementCreateApplication by lazy { ax.getFunction("AXUIElementCreateApplication") }
   private val axUIElementCopyAttributeValue by lazy { ax.getFunction("AXUIElementCopyAttributeValue") }
   private val axUIElementCopyAttributeNames by lazy { ax.getFunction("AXUIElementCopyAttributeNames") }
+  private val axUIElementCopyMultipleAttributeValues by lazy {
+    ax.getFunction("AXUIElementCopyMultipleAttributeValues")
+  }
   private val axUIElementCopyActionNames by lazy { ax.getFunction("AXUIElementCopyActionNames") }
   private val axUIElementCopyParameterizedAttributeNames by lazy {
     ax.getFunction("AXUIElementCopyParameterizedAttributeNames")
@@ -271,6 +284,76 @@ object MacOsAxNative {
     } finally {
       release(nameRef)
     }
+  }
+
+  /**
+   * Reads every attribute in [names] off [element] in **one** cross-process call
+   * (`AXUIElementCopyMultipleAttributeValues`), returning name → decoded value.
+   *
+   * Why this exists: the walk previously read attributes one at a time, so each element cost
+   * `1 + N` round trips (names, then a separate `AXUIElementCopyAttributeValue` per attribute) —
+   * ~30 for a typical element. Across a whole-desktop capture of ~5,400 elements that's well over
+   * 150,000 cross-process calls and it dominated everything: ~25 seconds per capture, paid again
+   * on every selector poll, which is what forced 90-second timeouts into trails and made a
+   * post-tool snapshot expensive enough to blow the call-handler timeout. Batching is the same
+   * data with an order of magnitude fewer trips — no fidelity is given up, every attribute is
+   * still captured verbatim.
+   *
+   * Errors come back **in-band**: with options=0 the call succeeds even when individual attributes
+   * fail, and each failed slot holds an `AXValueRef` of type [K_AX_VALUE_AX_ERROR] rather than
+   * being omitted. Those must be dropped, or an element that merely refuses one attribute would
+   * carry a garbage entry for it. Slots may also legitimately hold `kCFNull`.
+   *
+   * Returns null if the batch call fails outright, so the caller can fall back to reading
+   * attributes individually rather than silently capturing an element with no attributes.
+   */
+  fun copyMultipleAttributeValues(element: Pointer, names: List<String>): Map<String, MacOsAxAttributeValue>? {
+    if (names.isEmpty()) return emptyMap()
+    val nameRefs = names.map { cfString(it) }
+    val namesArray = createCfArray(nameRefs) ?: run {
+      nameRefs.forEach { release(it) }
+      return null
+    }
+    return try {
+      val out = PointerByReference()
+      val err = axUIElementCopyMultipleAttributeValues.invokeInt(arrayOf(element, namesArray, 0, out))
+      val values = out.value
+      if (err != 0 || values == null || values == Pointer.NULL) return null
+      try {
+        val count = arrayCount(values).toInt()
+        if (count != names.size) return null
+        val decoded = LinkedHashMap<String, MacOsAxAttributeValue>(count)
+        for (i in names.indices) {
+          val value = arrayValueAt(values, i.toLong())
+          if (value == Pointer.NULL) continue
+          if (isNull(value) || isAxError(value)) continue
+          decoded[names[i]] = decodeValue(value)
+        }
+        decoded
+      } finally {
+        release(values)
+      }
+    } finally {
+      release(namesArray)
+      nameRefs.forEach { release(it) }
+    }
+  }
+
+  /** True for the `kAXValueAXErrorType` placeholder a batch read leaves in a failed slot. */
+  private fun isAxError(ref: Pointer): Boolean =
+    cfGetTypeID.invokeLong(arrayOf(ref)) == axValueTypeId &&
+      axValueGetType.invokeInt(arrayOf(ref)) == K_AX_VALUE_AX_ERROR
+
+  private fun isNull(ref: Pointer): Boolean = cfGetTypeID.invokeLong(arrayOf(ref)) == nullTypeId
+
+  /** Builds a CFArray over [items] (retaining CF callbacks). Caller owns the result — [release] it. */
+  private fun createCfArray(items: List<Pointer>): Pointer? {
+    val buffer = Memory((items.size.toLong().coerceAtLeast(1)) * Native.POINTER_SIZE)
+    items.forEachIndexed { i, p -> buffer.setPointer((i.toLong() * Native.POINTER_SIZE), p) }
+    val array = cfArrayCreate.invokePointer(
+      arrayOf(Pointer.NULL, buffer, items.size.toLong(), kCFTypeArrayCallBacks),
+    )
+    return array?.takeIf { it != Pointer.NULL }
   }
 
   /**
