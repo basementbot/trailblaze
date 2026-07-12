@@ -806,6 +806,7 @@ object TrailblazeHostYamlRunner {
       xyz.block.trailblaze.host.macosax.tools.MacOsEraseTextTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsAssertNotVisibleTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsQuitAppTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsSetWindowBoundsTrailblazeTool::class,
     )
     val toolClasses = TrailblazeToolSetCatalog.defaultToolClassesForDriver(TrailblazeDriverType.MACOS_AX) +
       macOsToolClasses

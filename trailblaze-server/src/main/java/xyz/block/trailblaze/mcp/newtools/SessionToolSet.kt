@@ -483,6 +483,43 @@ class SessionToolSet(
     ).toJson()
   }
 
+  /**
+   * Warns when a saved trail clicks screen COORDINATES but never normalizes the window it clicks in.
+   *
+   * A coordinate step is sometimes unavoidable — apps that custom-draw their controls (wxWidgets,
+   * Electron canvases) and macOS's own system dialogs expose no element a selector can reach. But a
+   * coordinate is only meaningful relative to a window that is where it was when you recorded, and
+   * nothing in the trail says where that was. Such a trail passes today and quietly rots: it will
+   * click empty space, or worse, whatever has since moved under the cursor.
+   *
+   * `macos_setWindowBounds` fixes it by making the assumption true instead of hopeful. This is said
+   * at SAVE time — the one moment the author is looking at the recording and can still fix it —
+   * rather than months later when it fails on somebody else's screen.
+   */
+  internal fun fragileCoordinateWarning(yamlContent: String): String? {
+    if (!yamlContent.contains("macos_tapPoint") && !yamlContent.contains("macos_contextMenuSelect")) return null
+    if (yamlContent.contains("macos_setWindowBounds")) return null
+    return buildString {
+      appendLine("")
+      appendLine("⚠️  This trail clicks screen coordinates (macos_tapPoint / macos_contextMenuSelect)")
+      appendLine("    but never sets the window's position and size, so it silently assumes the window")
+      appendLine("    will be exactly where it was when you recorded it. On another screen — or after")
+      appendLine("    anyone moves the window — those clicks land somewhere else.")
+      appendLine("")
+      appendLine("    Add this as the FIRST tool of the first step, with the app's bundle id and the")
+      appendLine("    size you recorded at:")
+      appendLine("")
+      appendLine("      - macos_setWindowBounds:")
+      appendLine("          bundleId: com.example.app")
+      appendLine("          x: 100")
+      appendLine("          y: 80")
+      appendLine("          width: 1200")
+      appendLine("          height: 800")
+      appendLine("")
+      append("    Steps that use nodeSelector don't need this — a selector finds its element wherever it is.")
+    }
+  }
+
   private fun writeTrailFile(
     trailName: String,
     yamlContent: String,
@@ -494,10 +531,16 @@ class SessionToolSet(
       .saveTrailYaml(trailName, yamlContent, platform)
     return if (saveResult.success) {
       Console.log("[session] Trail saved to: ${saveResult.filePath}")
+      // Returned in the RESULT, not merely logged: the save happens daemon-side, and a warning
+      // printed there never reaches the person who just recorded the trail and is the only one who
+      // can still fix it. (Learned the hard way — the first version of this logged to the daemon and
+      // was invisible at the CLI.)
+      val warning = fragileCoordinateWarning(yamlContent)
+      warning?.let { Console.error(it) }
       SessionResult(
         status = "saved",
         file = saveResult.filePath,
-        message = "Trail saved: ${saveResult.filePath}",
+        message = "Trail saved: ${saveResult.filePath}" + (warning ?: ""),
       ).toJson()
     } else {
       SessionResult(error = saveResult.error ?: "Failed to write trail file").toJson()

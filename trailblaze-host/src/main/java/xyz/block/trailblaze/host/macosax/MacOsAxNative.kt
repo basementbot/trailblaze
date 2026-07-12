@@ -108,6 +108,7 @@ object MacOsAxNative {
   private val axUIElementGetPid by lazy { ax.getFunction("AXUIElementGetPid") }
   private val axValueGetType by lazy { ax.getFunction("AXValueGetType") }
   private val axValueGetValue by lazy { ax.getFunction("AXValueGetValue") }
+  private val axValueCreate by lazy { ax.getFunction("AXValueCreate") }
   private val axUIElementPerformAction by lazy { ax.getFunction("AXUIElementPerformAction") }
   private val axUIElementSetAttributeValue by lazy { ax.getFunction("AXUIElementSetAttributeValue") }
   private val axUIElementCopyElementAtPosition by lazy { ax.getFunction("AXUIElementCopyElementAtPosition") }
@@ -413,6 +414,107 @@ object MacOsAxNative {
   }
 
   /** Sets a boolean-valued attribute (e.g. `AXFocused = true`). Returns true on success. */
+  /**
+   * Moves and resizes [window] — the mechanism a trail uses to normalize an app's geometry before
+   * it acts, so a recording taken on one window layout replays faithfully on another.
+   *
+   * `AXPosition` and `AXSize` are *settable* on a standard window, but only through an `AXValue`
+   * box: you cannot hand the API two raw numbers, you hand it a CGPoint or a CGSize wrapped in an
+   * AXValueRef ([axValueCreate]). Both are two 64-bit doubles, which is why the buffer is 16 bytes.
+   *
+   * Position is set BEFORE size deliberately: some apps clamp a resize against the screen the
+   * window is currently on, so resizing first and moving second can silently give you a different
+   * size than the one you asked for.
+   */
+  fun setWindowBounds(window: Pointer, x: Int, y: Int, width: Int, height: Int): List<Int>? {
+    // Size first, then position — and then CHECK, because the setter's return code is not evidence.
+    //
+    // `AXUIElementSetAttributeValue` reports success when the element accepts the message, not when
+    // the app honors it (the same lie `AXValue` writes tell on Safari's address bar). Measured: the
+    // size took and the position silently did not, while the call returned 0 for both, so the tool
+    // cheerfully reported a window it had not moved. Resizing can also shift a window's origin, so
+    // position must be applied last or it gets undone by the resize that follows it.
+    setStructAttribute(window, "AXSize", K_AX_VALUE_CG_SIZE, width.toDouble(), height.toDouble())
+    setStructAttribute(window, "AXPosition", K_AX_VALUE_CG_POINT, x.toDouble(), y.toDouble())
+
+    // Read the frame back and hand the ACTUAL one to the caller. The setter's return code is not
+    // evidence, and "it refused" and "it did what it could" are different answers that the caller
+    // must be able to tell apart.
+    return readWindowFrame(window)
+  }
+
+  /**
+   * True when the window ended up where it was asked to be. Judged on the ORIGIN only, deliberately.
+   *
+   * The size is allowed to differ, because apps clamp it and clamping is not failure: Calculator has
+   * a minimum size and answered a request for 240x400 with 230x408. That's still perfectly
+   * deterministic — it will clamp to the same 230x408 on every machine, every run — so a trail
+   * normalized this way still replays faithfully. The ORIGIN is what a coordinate click actually
+   * depends on, and an origin that didn't take means every later click lands somewhere else.
+   */
+  fun windowMovedTo(frame: List<Int>, x: Int, y: Int): Boolean =
+    closeEnough(frame[0], x) && closeEnough(frame[1], y)
+
+  /** x, y, width, height of [window] in points, or null if it reports no frame. */
+  private fun readWindowFrame(window: Pointer): List<Int>? {
+    val position = copyAttributeValue(window, "AXPosition") ?: return null
+    val size = copyAttributeValue(window, "AXSize") ?: run { release(position); return null }
+    return try {
+      val point = decodeValue(position) as? MacOsAxAttributeValue.Point ?: return null
+      val dimensions = decodeValue(size) as? MacOsAxAttributeValue.Size ?: return null
+      listOf(point.x.toInt(), point.y.toInt(), dimensions.width.toInt(), dimensions.height.toInt())
+    } finally {
+      release(position)
+      release(size)
+    }
+  }
+
+  /**
+   * Windows land a pixel or two off what was asked for — a window rounds to its content grid, a
+   * terminal snaps to whole character cells. Demanding exactness would fail a window that did
+   * exactly what it was told; the tolerance is far tighter than anything that could move a click
+   * onto the wrong control.
+   */
+  private fun closeEnough(actual: Int, requested: Int): Boolean =
+    kotlin.math.abs(actual - requested) <= WINDOW_BOUNDS_TOLERANCE_PX
+
+  private const val WINDOW_BOUNDS_TOLERANCE_PX = 4
+
+  private fun setStructAttribute(
+    element: Pointer,
+    name: String,
+    axValueType: Int,
+    first: Double,
+    second: Double,
+  ): Boolean {
+    val buffer = Memory(16)
+    buffer.setDouble(0, first)
+    buffer.setDouble(8, second)
+    val valueRef = axValueCreate.invokePointer(arrayOf(axValueType, buffer))
+    if (valueRef == null || valueRef == Pointer.NULL) return false
+    val nameRef = cfString(name)
+    return try {
+      axUIElementSetAttributeValue.invokeInt(arrayOf(element, nameRef, valueRef)) == 0
+    } finally {
+      release(nameRef)
+      release(valueRef)
+    }
+  }
+
+  /**
+   * The app's main window — what "the window" means for a geometry change. Prefers the focused one
+   * (the window the user is actually in), falling back to the first. Caller owns the result.
+   */
+  fun mainWindow(appElement: Pointer): Pointer? {
+    copyAttributeValue(appElement, "AXFocusedWindow")?.let { return it }
+    val windows = copyAttributeValue(appElement, "AXWindows") ?: return null
+    return try {
+      if (arrayCount(windows) == 0L) null else copyAttributeValue(appElement, "AXMainWindow")
+    } finally {
+      release(windows)
+    }
+  }
+
   fun setBooleanAttribute(element: Pointer, name: String, value: Boolean): Boolean {
     val nameRef = cfString(name)
     val boolRef = if (value) cfBooleanTrue() else cfBooleanFalse()

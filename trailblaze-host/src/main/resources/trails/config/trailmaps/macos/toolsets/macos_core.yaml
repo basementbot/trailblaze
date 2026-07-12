@@ -22,3 +22,4 @@ tools:
   - macos_eraseText
   - macos_assertNotVisible
   - macos_quitApp
+  - macos_setWindowBounds

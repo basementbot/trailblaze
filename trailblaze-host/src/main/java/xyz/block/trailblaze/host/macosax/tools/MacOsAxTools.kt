@@ -481,6 +481,89 @@ data class MacOsAssertNotVisibleTrailblazeTool(
 }
 
 @Serializable
+@TrailblazeToolClass("macos_setWindowBounds")
+@LLMDescription(
+  "Move and resize an app's window to an exact position and size, in points. " +
+    "This is what makes a recorded trail survive a different machine. Any step that clicks a " +
+    "coordinate — unavoidable for apps that custom-draw their controls and expose no element to " +
+    "select — assumes the window is where it was when the trail was recorded. Normalize the window " +
+    "FIRST and that assumption becomes true instead of hopeful. Selector-based steps don't need " +
+    "this, but a trail that mixes the two does."
+)
+data class MacOsSetWindowBoundsTrailblazeTool(
+  @param:LLMDescription("X of the window's top-left corner, in points from the left of the main display.")
+  val x: Int,
+  @param:LLMDescription("Y of the window's top-left corner, in points from the top of the main display.")
+  val y: Int,
+  @param:LLMDescription("Window width in points.")
+  val width: Int,
+  @param:LLMDescription("Window height in points.")
+  val height: Int,
+  @param:LLMDescription("Bundle id of the app whose window to move. Defaults to the frontmost app.")
+  val bundleId: String? = null,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    if (width <= 0 || height <= 0) {
+      return TrailblazeToolResult.Error.ExceptionThrown("width and height must be positive.")
+    }
+    val pid = if (bundleId != null) {
+      MacOsAxAppResolver.runningPid(bundleId)
+        ?: return TrailblazeToolResult.Error.ExceptionThrown(
+          "'$bundleId' is not running — launch it first with macos_launchApp.",
+        )
+    } else {
+      MacOsAxNative.onScreenWindows().firstOrNull()?.pid
+        ?: return TrailblazeToolResult.Error.ExceptionThrown("No frontmost app whose window could be moved.")
+    }
+
+    var actualFrame: List<Int>? = null
+    val app = MacOsAxNative.createApplication(pid)
+    try {
+      val window = MacOsAxNative.mainWindow(app)
+        ?: return TrailblazeToolResult.Error.ExceptionThrown("That app exposes no window to Accessibility.")
+      val frame = try {
+        MacOsAxNative.setWindowBounds(window, x, y, width, height)
+      } finally {
+        MacOsAxNative.release(window)
+      } ?: return TrailblazeToolResult.Error.ExceptionThrown("That window reports no frame to set.")
+
+      if (!MacOsAxNative.windowMovedTo(frame, x, y)) {
+        return TrailblazeToolResult.Error.ExceptionThrown(
+          "The window would not move to ($x, $y) — it is at (${frame[0]}, ${frame[1]}). macOS will " +
+            "not move a full-screen window (leave full screen first), and some panels are pinned. " +
+            "Coordinate clicks after this would land in the wrong place, so this is a hard failure.",
+        )
+      }
+      actualFrame = frame
+    } finally {
+      MacOsAxNative.release(app)
+    }
+    // The window server applies the change asynchronously; a snapshot taken immediately can still
+    // report the old frame, and a coordinate click right after would land in the old place.
+    delay(WINDOW_SETTLE_MS)
+
+    val (_, _, actualWidth, actualHeight) = actualFrame!!
+    val clamped = actualWidth != width || actualHeight != height
+    val note = if (clamped) {
+      " — the app clamped its size (it has a minimum or a fixed aspect), so it is ${actualWidth}x" +
+        "$actualHeight rather than ${width}x$height. That is still deterministic: it will clamp the " +
+        "same way on every run. Record ${actualWidth}x$actualHeight in your trail to make it obvious."
+    } else {
+      ""
+    }
+    return TrailblazeToolResult.Success(
+      message = "Window at ($x, $y), ${actualWidth}x$actualHeight$note",
+    )
+  }
+
+  companion object {
+    private const val WINDOW_SETTLE_MS = 400L
+  }
+}
+
+@Serializable
 @TrailblazeToolClass("macos_quitApp")
 @LLMDescription("Quit an app by bundle id. Unsaved work may prompt a save dialog rather than quitting.")
 data class MacOsQuitAppTrailblazeTool(

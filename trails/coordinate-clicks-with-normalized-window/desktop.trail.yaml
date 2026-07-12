@@ -1,0 +1,59 @@
+- config:
+    title: Coordinate clicks with normalized window
+    platform: desktop
+    driver: MACOS_AX
+- prompts:
+  - step: Open Calculator
+    recording:
+      tools:
+      - macos_launchApp:
+          bundleId: com.apple.Calculator
+  - step: Normalize the window so coordinates mean something
+    recording:
+      tools:
+      - macos_setWindowBounds:
+          x: 300
+          y: 200
+          width: 240
+          height: 400
+          bundleId: com.apple.Calculator
+  - step: Clear
+    recording:
+      tools:
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              identifier: AllClear
+  - step: Press 7
+    recording:
+      tools:
+      - macos_tapPoint:
+          x: 334
+          y: 411
+  - step: Press multiply
+    recording:
+      tools:
+      - macos_tapPoint:
+          x: 496
+          y: 411
+  - step: Press 6
+    recording:
+      tools:
+      - macos_tapPoint:
+          x: 442
+          y: 465
+  - step: Press equals
+    recording:
+      tools:
+      - macos_tapPoint:
+          x: 496
+          y: 573
+  - step: Confirm 42
+    recording:
+      tools:
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: .?42
+          timeoutMs: 10000
