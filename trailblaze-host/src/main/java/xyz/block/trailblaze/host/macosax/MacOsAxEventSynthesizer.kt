@@ -21,9 +21,15 @@ object MacOsAxEventSynthesizer {
   // CGEventType
   private const val K_CG_EVENT_LEFT_MOUSE_DOWN = 1
   private const val K_CG_EVENT_LEFT_MOUSE_UP = 2
+  private const val K_CG_EVENT_RIGHT_MOUSE_DOWN = 3
+  private const val K_CG_EVENT_RIGHT_MOUSE_UP = 4
 
   // CGMouseButton
   private const val K_CG_MOUSE_BUTTON_LEFT = 0
+  private const val K_CG_MOUSE_BUTTON_RIGHT = 1
+
+  /** `kCGMouseEventClickState` — the field that tells macOS "this is click number N of a series". */
+  private const val K_CG_MOUSE_EVENT_CLICK_STATE = 1L
 
   // CGEventTapLocation
   private const val K_CG_HID_EVENT_TAP = 0
@@ -49,6 +55,9 @@ object MacOsAxEventSynthesizer {
   private val cgEventPost by lazy { cg.getFunction("CGEventPost") }
   private val cgEventSetFlags by lazy { cg.getFunction("CGEventSetFlags") }
   private val cgEventSetType by lazy { cg.getFunction("CGEventSetType") }
+  private val cgEventSetIntegerValueField by lazy { cg.getFunction("CGEventSetIntegerValueField") }
+  private val cgEventCreate by lazy { cg.getFunction("CGEventCreate") }
+  private val cgEventGetLocation by lazy { cg.getFunction("CGEventGetLocation") }
   private val cgWarpMouseCursorPosition by lazy { cg.getFunction("CGWarpMouseCursorPosition") }
   private val cfRelease by lazy { cf.getFunction("CFRelease") }
 
@@ -61,6 +70,23 @@ object MacOsAxEventSynthesizer {
     class ByValue(x: Double = 0.0, y: Double = 0.0) : CGPoint(x, y), Structure.ByValue
   }
 
+  /**
+   * Where the mouse cursor currently is, in global screen points. Every synthetic click warps the
+   * cursor to its target first, so after a click this is that target — which is how a follow-up
+   * tool can find the menu a right-click just opened without being told where it was.
+   */
+  fun cursorPosition(): Pair<Int, Int> {
+    val event = cgEventCreate.invokePointer(arrayOf(Pointer.NULL)) ?: return 0 to 0
+    return try {
+      val point = cgEventGetLocation.invokeObject(arrayOf(event)) as? CGPoint.ByValue
+      if (point == null) 0 to 0 else point.x.toInt() to point.y.toInt()
+    } catch (e: Exception) {
+      0 to 0
+    } finally {
+      cfRelease.invokeVoid(arrayOf(event))
+    }
+  }
+
   /** Synthesizes a left click (down+up) at global screen point ([x], [y]). */
   fun click(x: Int, y: Int) {
     val point = CGPoint.ByValue(x.toDouble(), y.toDouble())
@@ -69,12 +95,50 @@ object MacOsAxEventSynthesizer {
     postMouse(K_CG_EVENT_LEFT_MOUSE_UP, point)
   }
 
-  private fun postMouse(type: Int, point: CGPoint.ByValue) {
+  /**
+   * Right-click (secondary click) at a global screen point — how you reach a context menu, which
+   * is where a large amount of desktop functionality lives (Finder's file actions, "Copy", "Open
+   * With", "Inspect Element") and which no AXPress can summon.
+   */
+  fun rightClick(x: Int, y: Int) {
+    val point = CGPoint.ByValue(x.toDouble(), y.toDouble())
+    cgWarpMouseCursorPosition.invokeVoid(arrayOf(point))
+    postMouse(K_CG_EVENT_RIGHT_MOUSE_DOWN, point, button = K_CG_MOUSE_BUTTON_RIGHT)
+    postMouse(K_CG_EVENT_RIGHT_MOUSE_UP, point, button = K_CG_MOUSE_BUTTON_RIGHT)
+  }
+
+  /**
+   * Double-click at a global screen point — Finder opens a file, a text view selects a word.
+   *
+   * Two clicks in quick succession are NOT a double-click: macOS decides that from the event's
+   * `clickState` field, so the second click must be *stamped* as click 2 of a series or the app
+   * just sees two independent clicks and opens nothing.
+   */
+  fun doubleClick(x: Int, y: Int) {
+    val point = CGPoint.ByValue(x.toDouble(), y.toDouble())
+    cgWarpMouseCursorPosition.invokeVoid(arrayOf(point))
+    postMouse(K_CG_EVENT_LEFT_MOUSE_DOWN, point, clickState = 1)
+    postMouse(K_CG_EVENT_LEFT_MOUSE_UP, point, clickState = 1)
+    postMouse(K_CG_EVENT_LEFT_MOUSE_DOWN, point, clickState = 2)
+    postMouse(K_CG_EVENT_LEFT_MOUSE_UP, point, clickState = 2)
+  }
+
+  private fun postMouse(
+    type: Int,
+    point: CGPoint.ByValue,
+    button: Int = K_CG_MOUSE_BUTTON_LEFT,
+    clickState: Int = 0,
+  ) {
     val event = cgEventCreateMouseEvent.invokePointer(
-      arrayOf(Pointer.NULL, type, point, K_CG_MOUSE_BUTTON_LEFT),
+      arrayOf(Pointer.NULL, type, point, button),
     )
     if (event == null || event == Pointer.NULL) return
     try {
+      if (clickState > 0) {
+        cgEventSetIntegerValueField.invokeVoid(
+          arrayOf(event, K_CG_MOUSE_EVENT_CLICK_STATE.toInt(), clickState.toLong()),
+        )
+      }
       cgEventPost.invokeVoid(arrayOf(K_CG_HID_EVENT_TAP, event))
     } finally {
       cfRelease.invokeVoid(arrayOf(event))

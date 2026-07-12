@@ -5,6 +5,8 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import maestro.KeyCode
 import xyz.block.trailblaze.host.macosax.MacOsAxEventSynthesizer
+import xyz.block.trailblaze.host.macosax.MacOsAxMenu
+import xyz.block.trailblaze.api.TrailblazeNodeSelectorResolver
 import maestro.orchestra.Command
 import maestro.orchestra.InputTextCommand
 import maestro.orchestra.LaunchAppCommand
@@ -247,6 +249,286 @@ data class MacOsAssertVisibleTrailblazeTool(
     ) ?: TrailblazeToolResult.Error.ExceptionThrown(
       "Element not visible for selector ${nodeSelector.description()}.",
     )
+  }
+}
+
+/** Scroll directions, in the sense the CONTENT moves (DOWN reveals what is below the fold). */
+@Serializable
+enum class MacOsScrollDirection { UP, DOWN, LEFT, RIGHT }
+
+@Serializable
+@TrailblazeToolClass("macos_scroll")
+@LLMDescription(
+  "Scroll the frontmost window. Without this you can only ever act on what happens to be on " +
+    "screen already — anything below the fold is unreachable. DOWN reveals content further down " +
+    "the page. Scroll, then take a new snapshot: elements that were off-screen appear (and their " +
+    "coordinates change), because the tree reflects what is laid out NOW."
+)
+data class MacOsScrollTrailblazeTool(
+  @param:LLMDescription("UP, DOWN, LEFT or RIGHT. DOWN reveals content below the fold.")
+  val direction: MacOsScrollDirection,
+  @param:LLMDescription("How far to scroll, in points. Defaults to 300 (roughly a few lines).")
+  val amountPx: Int = 300,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    // A wheel event goes to whatever sits under the POINTER, so it has to land over real content:
+    // the frontmost window's centre. CGWindowList returns windows front-to-back, so that's the
+    // first one.
+    val window = MacOsAxNative.onScreenWindows().firstOrNull()
+      ?: return TrailblazeToolResult.Error.ExceptionThrown("No on-screen window to scroll.")
+    val x = (window.left + window.right) / 2
+    val y = (window.top + window.bottom) / 2
+    val (dx, dy) = when (direction) {
+      MacOsScrollDirection.UP -> 0 to amountPx
+      MacOsScrollDirection.DOWN -> 0 to -amountPx
+      MacOsScrollDirection.LEFT -> amountPx to 0
+      MacOsScrollDirection.RIGHT -> -amountPx to 0
+    }
+    MacOsAxEventSynthesizer.scroll(x, y, dx, dy)
+    delay(SCROLL_SETTLE_MS)
+    return TrailblazeToolResult.Success(message = "Scrolled $direction by ${amountPx}px")
+  }
+
+  companion object {
+    /** Let the app repaint before anything reads the screen, or the snapshot shows the old offset. */
+    private const val SCROLL_SETTLE_MS = 400L
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_menuItem")
+@LLMDescription(
+  "Click an item in the frontmost app's MENU BAR, by path — e.g. path: [\"File\", \"New Window\"] " +
+    "or [\"Format\", \"Font\", \"Bold\"]. A great deal of macOS lives only in a menu (Export as " +
+    "PDF, Show Hidden Files, Merge All Windows, anything with no keyboard shortcut) and menus are " +
+    "NOT in the snapshot — an app's menu bar fans out into hundreds of lazily-populated items and " +
+    "walking it on every capture would cost more than the rest of the tree combined, so it is " +
+    "visited only when you ask. Titles must match what the menu actually says; if one doesn't, the " +
+    "error lists the real ones."
+)
+data class MacOsMenuItemTrailblazeTool(
+  @param:LLMDescription("Menu path from the menu bar down, e.g. [\"File\", \"New Window\"].")
+  val path: List<String>,
+  @param:LLMDescription("Bundle id of the app whose menu bar to use. Defaults to whichever app is frontmost.")
+  val bundleId: String? = null,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    // A menu bar belongs to an APP, and the one on screen belongs to the frontmost app — so an
+    // explicit bundleId is activated first, or we would drive the wrong app's File menu.
+    val pid = if (bundleId != null) {
+      MacOsAxAppResolver.activate(bundleId)
+      delay(APP_SETTLE_MS)
+      MacOsAxAppResolver.ensureRunning(bundleId)
+        ?: return TrailblazeToolResult.Error.ExceptionThrown("'$bundleId' is not running.")
+    } else {
+      MacOsAxNative.onScreenWindows().firstOrNull()?.pid
+        ?: return TrailblazeToolResult.Error.ExceptionThrown("No frontmost app to take a menu from.")
+    }
+    val failure = MacOsAxMenu.clickPath(pid, path)
+    delay(MENU_SETTLE_MS)
+    return if (failure == null) {
+      TrailblazeToolResult.Success(message = "Clicked menu ${path.joinToString(" > ")}")
+    } else {
+      TrailblazeToolResult.Error.ExceptionThrown(failure)
+    }
+  }
+
+  companion object {
+    private const val APP_SETTLE_MS = 500L
+    private const val MENU_SETTLE_MS = 400L
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_contextMenuSelect")
+@LLMDescription(
+  "Right-click something and choose an item from the context menu that opens — 'Open Link in New " +
+    "Tab', 'Copy', 'Open With', 'Inspect Element'. Context menus hold a large amount of desktop " +
+    "functionality and cannot be reached any other way. " +
+    "This is deliberately ONE operation rather than a right-click followed by a click: an open " +
+    "menu is a modal state, it does not appear in the snapshot, and taking a snapshot while one is " +
+    "open can hang the capture — so the menu is opened and acted on in a single step, and dismissed " +
+    "if the item isn't there. If the title doesn't match, the error lists the items that are."
+)
+data class MacOsContextMenuSelectTrailblazeTool(
+  @param:LLMDescription("Exact item title as shown in the menu, e.g. 'Open Link in New Tab'.")
+  val item: String,
+  @param:LLMDescription("Element to right-click. Preferred over x/y — a selector survives the window moving.")
+  val nodeSelector: TrailblazeNodeSelector? = null,
+  @param:LLMDescription("X point to right-click, if no selector.")
+  val x: Int? = null,
+  @param:LLMDescription("Y point to right-click, if no selector.")
+  val y: Int? = null,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    val point = MacOsPointResolver.resolve(toolExecutionContext, nodeSelector, x, y)
+      ?: return TrailblazeToolResult.Error.ExceptionThrown(
+        "macos_contextMenuSelect needs either a nodeSelector that matches, or an x/y point.",
+      )
+    val pid = MacOsAxNative.onScreenWindows().firstOrNull()?.pid
+      ?: return TrailblazeToolResult.Error.ExceptionThrown("No frontmost app to right-click in.")
+
+    MacOsAxEventSynthesizer.rightClick(point.first, point.second)
+    delay(MENU_OPEN_MS)
+
+    val failure = MacOsAxMenu.clickOpenMenuItem(
+      pid = pid,
+      title = item,
+      nearX = point.first,
+      nearY = point.second,
+    )
+    return if (failure == null) {
+      delay(MENU_ACTION_MS)
+      TrailblazeToolResult.Success(message = "Right-clicked (${point.first}, ${point.second}) and chose '$item'")
+    } else {
+      // Never leave the desktop sitting in an open menu: it's modal, it's invisible to the snapshot,
+      // and the next capture has to deal with it. Escape puts things back the way we found them.
+      MacOsAxEventSynthesizer.pressKeyCode(MacOsAxEventSynthesizer.KEY_CODE_ESCAPE)
+      delay(MENU_ACTION_MS)
+      TrailblazeToolResult.Error.ExceptionThrown(failure)
+    }
+  }
+
+  companion object {
+    /** Context menus animate open; looking for the items too early finds nothing. */
+    private const val MENU_OPEN_MS = 600L
+    private const val MENU_ACTION_MS = 500L
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_doubleClick")
+@LLMDescription(
+  "Double-click — open a file in Finder, select a word in a text field. A single click does not " +
+    "open anything, and two macos_tapOnElement calls are not a double-click: macOS decides that " +
+    "from the click's timing and its click-count field, so it has to be sent as one gesture."
+)
+data class MacOsDoubleClickTrailblazeTool(
+  @param:LLMDescription("Element to double-click. Preferred over x/y.")
+  val nodeSelector: TrailblazeNodeSelector? = null,
+  @param:LLMDescription("X point, if no selector.")
+  val x: Int? = null,
+  @param:LLMDescription("Y point, if no selector.")
+  val y: Int? = null,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    val point = MacOsPointResolver.resolve(toolExecutionContext, nodeSelector, x, y)
+      ?: return TrailblazeToolResult.Error.ExceptionThrown(
+        "macos_doubleClick needs either a nodeSelector that matches, or an x/y point.",
+      )
+    MacOsAxEventSynthesizer.doubleClick(point.first, point.second)
+    delay(OPEN_SETTLE_MS)
+    return TrailblazeToolResult.Success(message = "Double-clicked at (${point.first}, ${point.second})")
+  }
+
+  companion object {
+    private const val OPEN_SETTLE_MS = 600L
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_eraseText")
+@LLMDescription("Delete characters from the focused field, as if pressing Backspace that many times.")
+data class MacOsEraseTextTrailblazeTool(
+  @param:LLMDescription("How many characters to delete.")
+  val characters: Int,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    if (characters < 1) {
+      return TrailblazeToolResult.Error.ExceptionThrown("characters must be at least 1, got $characters.")
+    }
+    MacOsAxEventSynthesizer.pressKeyCode(MacOsAxEventSynthesizer.KEY_CODE_DELETE, characters)
+    return TrailblazeToolResult.Success(message = "Erased $characters character(s)")
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_assertNotVisible")
+@LLMDescription(
+  "Assert an element is NOT on screen — that a dialog closed, a spinner finished, an item was " +
+    "deleted. Polls until the timeout, so it waits for the thing to GO AWAY rather than checking " +
+    "once and passing because it hadn't appeared yet."
+)
+data class MacOsAssertNotVisibleTrailblazeTool(
+  val nodeSelector: TrailblazeNodeSelector,
+  val timeoutMs: Long? = null,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    val agent = toolExecutionContext.maestroTrailblazeAgent
+      ?: return TrailblazeToolResult.Error.ExceptionThrown(
+        "macos_assertNotVisible requires the macOS AX agent, which was not available.",
+      )
+    return agent.executeNodeSelectorAssertNotVisible(
+      nodeSelector = nodeSelector,
+      timeoutMs = timeoutMs,
+      traceId = toolExecutionContext.traceId,
+    ) ?: TrailblazeToolResult.Error.ExceptionThrown(
+      "Element still visible for selector ${nodeSelector.description()}.",
+    )
+  }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_quitApp")
+@LLMDescription("Quit an app by bundle id. Unsaved work may prompt a save dialog rather than quitting.")
+data class MacOsQuitAppTrailblazeTool(
+  @param:LLMDescription("Bundle id of the app to quit, e.g. com.apple.TextEdit.")
+  val bundleId: String,
+) : ExecutableTrailblazeTool {
+  override suspend fun execute(
+    toolExecutionContext: TrailblazeToolExecutionContext,
+  ): TrailblazeToolResult {
+    val quit = MacOsAxAppResolver.quit(bundleId)
+    delay(QUIT_SETTLE_MS)
+    return if (quit) {
+      TrailblazeToolResult.Success(message = "Quit $bundleId")
+    } else {
+      TrailblazeToolResult.Error.ExceptionThrown("Could not quit '$bundleId'.")
+    }
+  }
+
+  companion object {
+    private const val QUIT_SETTLE_MS = 500L
+  }
+}
+
+/**
+ * Turns "a selector, or an x/y" into a screen point, for the tools that can take either.
+ *
+ * Resolves against the screen state the tool was handed — the same tree the caller read when it
+ * chose the selector — rather than re-capturing, so the coordinates match the snapshot the caller
+ * is actually looking at.
+ */
+internal object MacOsPointResolver {
+  fun resolve(
+    context: TrailblazeToolExecutionContext,
+    nodeSelector: TrailblazeNodeSelector?,
+    x: Int?,
+    y: Int?,
+  ): Pair<Int, Int>? {
+    if (nodeSelector != null) {
+      val tree = context.screenState?.trailblazeNodeTree ?: return null
+      val node = when (val r = TrailblazeNodeSelectorResolver.resolve(tree, nodeSelector)) {
+        is TrailblazeNodeSelectorResolver.ResolveResult.SingleMatch -> r.node
+        is TrailblazeNodeSelectorResolver.ResolveResult.MultipleMatches -> r.nodes.firstOrNull()
+        is TrailblazeNodeSelectorResolver.ResolveResult.NoMatch -> null
+      } ?: return null
+      return node.centerPoint()
+    }
+    if (x != null && y != null) return x to y
+    return null
   }
 }
 

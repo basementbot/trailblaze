@@ -1053,6 +1053,7 @@ class TrailblazeMcpBridgeImpl(
               return { _ ->
                 xyz.block.trailblaze.host.screenstate.MacOsAxScreenState(
                   pid = device.pid, deviceWidth = device.deviceWidth, deviceHeight = device.deviceHeight,
+                  wholeScreen = device.wholeScreen,
                 )
               }
             }
@@ -1575,8 +1576,13 @@ class TrailblazeMcpBridgeImpl(
       trailblazeDeviceInfoProvider = { macOsAxDeviceInfo(device) },
       sessionProvider = { macOsAxSession() },
     )
+    // wholeScreen matters: without it the `desktop/all` device (pid 0) builds a screen state that
+    // walks a process that doesn't exist, so the tree is empty and every tool reading
+    // `context.screenState` — anything selector-based that isn't routed through the device manager —
+    // silently finds nothing to match.
     val screenState = xyz.block.trailblaze.host.screenstate.MacOsAxScreenState(
       pid = device.pid, deviceWidth = device.deviceWidth, deviceHeight = device.deviceHeight,
+      wholeScreen = device.wholeScreen,
     )
     Console.log("[MACOS_AX] Executing ${tool::class.simpleName} on ${device.bundleId} (pid=${device.pid})")
     val ctx = TrailblazeToolExecutionContext(

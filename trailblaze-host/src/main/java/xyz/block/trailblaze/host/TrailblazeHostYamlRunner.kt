@@ -790,6 +790,13 @@ object TrailblazeHostYamlRunner {
       xyz.block.trailblaze.host.macosax.tools.MacOsActivateAppTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsAssertVisibleTrailblazeTool::class,
       xyz.block.trailblaze.host.macosax.tools.MacOsOpenUrlTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsScrollTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsMenuItemTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsContextMenuSelectTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsDoubleClickTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsEraseTextTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsAssertNotVisibleTrailblazeTool::class,
+      xyz.block.trailblaze.host.macosax.tools.MacOsQuitAppTrailblazeTool::class,
     )
     val toolClasses = TrailblazeToolSetCatalog.defaultToolClassesForDriver(TrailblazeDriverType.MACOS_AX) +
       macOsToolClasses

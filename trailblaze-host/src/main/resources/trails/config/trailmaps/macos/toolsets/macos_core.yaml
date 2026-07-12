@@ -15,3 +15,10 @@ tools:
   - macos_activateApp
   - macos_assertVisible
   - macos_openUrl
+  - macos_scroll
+  - macos_menuItem
+  - macos_contextMenuSelect
+  - macos_doubleClick
+  - macos_eraseText
+  - macos_assertNotVisible
+  - macos_quitApp

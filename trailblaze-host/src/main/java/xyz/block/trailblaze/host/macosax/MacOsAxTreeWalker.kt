@@ -28,12 +28,40 @@ object MacOsAxTreeWalker {
   private const val CHILDREN_ATTRIBUTE = "AXChildren"
 
   /**
-   * Roles whose subtrees we capture the node for but do NOT recurse into. The menu bar is the big
-   * one: a macOS app's `AXMenuBar` fans out into hundreds of lazily-populated `AXMenuItem`s (Apple
-   * menu → Recent Items, every app menu, …), and because we read *every* attribute of *every* node
-   * via a separate cross-process AX call, walking it costs thousands of slow IPC round-trips —
-   * prohibitive when a driver re-captures the tree on every poll. Menus are a separate interaction
-   * concern (open one explicitly, then capture) rather than part of the always-on window tree.
+   * Hard ceiling on how many elements one capture will walk.
+   *
+   * Without it, a single hostile page takes the whole daemon down. Chrome's "View Page Source"
+   * renders every line of HTML as its own accessibility element; capturing that tab exhausted a 4GB
+   * heap and killed the JVM with an OutOfMemoryError — not a slow capture, a dead daemon, taking
+   * any run in flight with it. A DOM is unbounded and the tree is built in memory, so the walk has
+   * to have a limit somewhere, and a truncated tree beats no daemon.
+   *
+   * 10,000 is twice what a busy whole-desktop capture actually needs (~5,000 elements across nine
+   * apps), and low enough to matter: a session RETAINS one of these trees per logged step, so the
+   * ceiling bounds the session's memory, not just one capture's. Truncation is logged rather than
+   * silent — a capture that quietly stopped early would present as "the element isn't on screen".
+   */
+  private const val MAX_NODES_PER_CAPTURE = 10_000
+
+  /**
+   * Roles whose subtrees we capture the node for but do NOT recurse into.
+   *
+   * The menu **bar** is the cost: an app's `AXMenuBar` fans out into hundreds of lazily-populated
+   * items (Apple menu → Recent Items, every app menu, every submenu), and walking it on every
+   * capture would cost more than the rest of the tree combined — prohibitive when the driver
+   * re-captures on every selector poll. It's reached on demand instead, via [MacOsAxMenu].
+   *
+   * `AXMenu` is excluded for the same reason, and this was worth learning the hard way. Context
+   * menus opened by `macos_rightClick` weren't in the tree, so I let the walk descend into AXMenu —
+   * and a whole-desktop capture went from 7s to 46s, then to **170s** once a few menus had been
+   * opened. Gating on "the menu has on-screen bounds" didn't save it: apps keep menus alive, laid
+   * out and enormous, long after they're closed. There is no cheap way to tell an open menu from a
+   * dormant one during a walk.
+   *
+   * So menus stay out of the capture entirely, and both kinds are reached on demand instead:
+   * [MacOsAxMenu.clickPath] for the menu bar, [MacOsAxMenu.clickOpenMenuItem] for whatever menu is
+   * currently open. That costs a handful of AX calls when you ask, and nothing at all when you
+   * don't.
    */
   private val ROLES_TO_NOT_RECURSE = setOf("AXMenuBar", "AXMenuBarItem", "AXMenu")
 
@@ -120,6 +148,9 @@ object MacOsAxTreeWalker {
   private class NodeIdCounter {
     private val next = java.util.concurrent.atomic.AtomicLong(0)
     fun next(): Long = next.getAndIncrement()
+
+    /** How many nodes this capture has produced — the budget [MAX_NODES_PER_CAPTURE] bounds. */
+    fun count(): Long = next.get()
   }
 
   /**
@@ -156,18 +187,39 @@ object MacOsAxTreeWalker {
 
     // Capture the node itself, but don't recurse into prohibitively-large/slow subtrees (menus).
     val role = (attributes["AXRole"] as? MacOsAxAttributeValue.Str)?.value
-    val children = if (depth >= MAX_DEPTH || role in ROLES_TO_NOT_RECURSE) {
-      emptyList()
-    } else {
-      captureChildren(element, counter, depth, ancestors + element)
+    val bounds = deriveBounds(attributes)
+    val children = when {
+      depth >= MAX_DEPTH -> emptyList()
+      role in ROLES_TO_NOT_RECURSE -> emptyList()
+      // Stop descending once the capture has spent its node budget. Checked here rather than at the
+      // top of walk() so the node itself is still emitted — the tree stays well-formed, it just
+      // stops getting deeper.
+      counter.count() >= MAX_NODES_PER_CAPTURE -> {
+        warnTruncatedOnce()
+        emptyList()
+      }
+      else -> captureChildren(element, counter, depth, ancestors + element)
     }
 
     return TrailblazeNode(
       nodeId = nodeId,
-      bounds = deriveBounds(attributes),
+      bounds = bounds,
       children = children,
       driverDetail = detail,
     )
+  }
+
+  private val truncationWarned = java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Says so, once per capture-storm, rather than letting a truncated tree look like a missing UI. */
+  private fun warnTruncatedOnce() {
+    if (truncationWarned.compareAndSet(false, true)) {
+      System.err.println(
+        "[MacOsAxTreeWalker] capture hit the $MAX_NODES_PER_CAPTURE-element ceiling and stopped " +
+          "descending. Some app on screen is exposing an enormous accessibility tree (Chrome's " +
+          "View Page Source does this). Elements below the cut are not in the tree.",
+      )
+    }
   }
 
   /** One `AXUIElementCopyAttributeValue` per attribute — the fallback when the batch read fails. */

@@ -92,8 +92,13 @@ fi
 
 # JVM args required for Compose Desktop on macOS — Skiko's JNI native code needs
 # access to internal AWT classes. Without these, java -jar crashes with SIGSEGV.
-# Default max heap covers report generation with large session logs.
-TRAILBLAZE_JVM_ARGS="-Xmx4g"
+#
+# Heap: a session retains a full accessibility tree per logged step, and the macOS whole-desktop
+# driver's trees are big (thousands of elements across every on-screen app). A long desktop session
+# exhausted 4g and died with an OutOfMemoryError mid-run — and a dead daemon takes any in-flight run
+# with it. 8g is headroom for that, alongside the per-capture element ceiling in MacOsAxTreeWalker;
+# report generation over large session logs wants the room regardless.
+TRAILBLAZE_JVM_ARGS="-Xmx8g"
 if [[ "$(uname)" == "Darwin" ]]; then
   TRAILBLAZE_JVM_ARGS="$TRAILBLAZE_JVM_ARGS --add-opens java.desktop/sun.awt=ALL-UNNAMED --add-opens java.desktop/sun.lwawt=ALL-UNNAMED --add-opens java.desktop/sun.lwawt.macosx=ALL-UNNAMED"
 fi

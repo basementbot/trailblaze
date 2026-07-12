@@ -68,6 +68,15 @@ class MacOsAxActionExecutor(private val pid: Int) {
     }
   }
 
+  /**
+   * Centre of the frontmost on-screen window, in points — where a scroll or a context click should
+   * land. `CGWindowListCopyWindowInfo` returns windows front-to-back, so the first one is it.
+   */
+  private fun frontmostWindowCentre(): Pair<Int, Int>? =
+    MacOsAxNative.onScreenWindows().firstOrNull()?.let {
+      (it.left + it.right) / 2 to (it.top + it.bottom) / 2
+    }
+
   /** Re-evaluates [condition] against fresh captures until it's true or [timeoutMs] elapses. */
   private fun pollUntil(timeoutMs: Long, condition: () -> Boolean): Boolean {
     val deadline = System.currentTimeMillis() + timeoutMs
@@ -189,9 +198,15 @@ class MacOsAxActionExecutor(private val pid: Int) {
   }
 
   private fun scroll(action: MacOsAxAction.Scroll): Boolean {
-    // Scroll at the target window's center so the wheel event lands over app content.
-    val tree = captureTree()
-    val center = tree.bounds?.let { it.centerX to it.centerY } ?: (0 to 0)
+    // A scroll wheel event goes to whatever is under the POINTER, so it has to land over real app
+    // content. The tree root's centre is not that: on the whole-desktop device the root is a
+    // synthetic node with no bounds at all, so this fell back to (0, 0) — the top-left corner of
+    // the screen, over the menu bar — and scrolled nothing. Aim at the frontmost window instead,
+    // which is what a person would be looking at. Falls back to the tree root (a single-app
+    // capture's root IS the app), then to the display centre.
+    val center = frontmostWindowCentre()
+      ?: captureTree().bounds?.let { it.centerX to it.centerY }
+      ?: MacOsAxAppResolver.mainDisplaySize().let { it.width / 2 to it.height / 2 }
     val amt = action.amountPx
     val (dx, dy) = when (action.direction) {
       MacOsAxAction.Direction.UP -> 0 to amt
