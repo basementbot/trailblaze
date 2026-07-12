@@ -4,8 +4,31 @@
         macOsAx:
           roleRegex: AXWindow
           titleRegex: .*Handstand Sam.*
-      timeoutMs: 20000
+      timeoutMs: 40000
 - prompts:
+  - step: Drive the browser with keyboard shortcuts alone
+    recording:
+      tools:
+      - macos_pressKeyCombo:
+          key: T
+          modifiers:
+          - COMMAND
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXWindow
+              titleRegex: .*New Tab.*
+          timeoutMs: 20000
+      - macos_pressKeyCombo:
+          key: W
+          modifiers:
+          - COMMAND
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXWindow
+              titleRegex: .*Handstand Sam.*
+          timeoutMs: 20000
   - step: Switch back to Calculator and confirm our work is still there
     recording:
       tools:

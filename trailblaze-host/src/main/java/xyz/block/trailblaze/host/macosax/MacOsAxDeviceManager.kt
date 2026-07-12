@@ -29,6 +29,13 @@ class MacOsAxDeviceManager(
 
   companion object {
     private const val POLL_INTERVAL_MS = 150L
+
+    /**
+     * How long the ACTIVE app gets to produce the element before we go looking in every app.
+     * Long enough to cover an ordinary render/settle (the common case, and the one we must not pay
+     * a whole-desktop capture for); short enough that a background element doesn't stall a replay.
+     */
+    private const val ACTIVE_APP_GRACE_MS = 3_000L
     private const val SETTLE_DELAY_MS = 300L
   }
 
@@ -166,27 +173,52 @@ class MacOsAxDeviceManager(
       ?: nodes.first()
 
   /**
-   * Polls a fresh capture until [selector] resolves or [timeoutMs] elapses — then, on the
-   * frontmost-app device, looks ONCE more across every app before giving up.
+   * Resolves [selector], preferring the fast active-app scope and widening to every app when it has
+   * to — but never so late, or so quietly, that a recorded trail pays for it forever.
    *
-   * The default scope is the active app because a whole-desktop capture is far too slow to poll
-   * with. But "I didn't look there" must never be reported as "it isn't there": a selector naming
-   * something in a background window would fail with a confident, wrong "not found". So the fast
-   * scope carries the polling, and the slow scope gets the last word — you pay the ~5s only in the
-   * case that would otherwise have been a lie, and a match found this way still tells the truth
-   * about itself, since the tap/assert gates refuse elements buried behind another window.
+   * The naive version of this (poll the active app for the WHOLE timeout, then widen once) is wrong
+   * for replay in two ways, and replay is the case that matters most:
+   *
+   *  - **It stalls.** A recorded trail whose element lives in a background app would sit through the
+   *    entire timeout — 30s, 90s, whatever the author wrote — before even looking there. So the
+   *    widen happens after a short grace period instead, and the trail finds it in seconds.
+   *  - **It hides.** Resolving from a background app SILENTLY means the recording depends on a slow
+   *    whole-desktop capture on every future run and nothing says so. Nobody would ever know to fix
+   *    it. So it warns, names the app, and says exactly what to add.
+   *
+   * The grace period is what keeps the common case fast: an assertion right after a navigation is
+   * usually waiting for content that hasn't rendered yet *in the app it's already looking at*, and
+   * widening instantly would pay ~10s for something that was about to appear anyway.
    */
   private fun awaitSelector(
     selector: xyz.block.trailblaze.api.TrailblazeNodeSelector,
     timeoutMs: Long,
   ): TrailblazeNode? {
-    pollForSelector(selector, timeoutMs)?.let { return it }
-    if (pid != MacOsAxTreeWalker.PID_FRONTMOST_APP) return null
+    if (pid != MacOsAxTreeWalker.PID_FRONTMOST_APP) return pollForSelector(selector, timeoutMs)
 
-    Console.log(
-      "[MacOsAxDeviceManager] '${selector.description()}' not in the active app — widening to every " +
-        "on-screen app once before failing (this is the slow path)",
-    )
+    // Give the active app a short head start — most of the time the thing is simply still rendering.
+    val grace = minOf(timeoutMs, ACTIVE_APP_GRACE_MS)
+    pollForSelector(selector, grace)?.let { return it }
+
+    // Then look everywhere, once. If it's in another app, we find it in seconds rather than after
+    // the caller's whole timeout.
+    resolveAcrossAllApps(selector)?.let { node ->
+      warnResolvedInBackgroundApp(selector, node)
+      return node
+    }
+
+    // Not in ANY app yet — so it hasn't appeared. Keep waiting on the active app (fast polls),
+    // then take one last look everywhere before calling it absent.
+    val remaining = timeoutMs - grace
+    if (remaining > 0) {
+      pollForSelector(selector, remaining)?.let { return it }
+    }
+    return resolveAcrossAllApps(selector)?.also { warnResolvedInBackgroundApp(selector, it) }
+  }
+
+  private fun resolveAcrossAllApps(
+    selector: xyz.block.trailblaze.api.TrailblazeNodeSelector,
+  ): TrailblazeNode? {
     val everything = runCatching { MacOsAxTreeWalker.captureFor(MacOsAxTreeWalker.PID_ALL_APPS) }.getOrNull()
       ?: return null
     return when (val result = TrailblazeNodeSelectorResolver.resolve(everything, selector, templateContext)) {
@@ -194,6 +226,31 @@ class MacOsAxDeviceManager(
       is TrailblazeNodeSelectorResolver.ResolveResult.MultipleMatches -> pickPreferredMatch(result.nodes)
       is TrailblazeNodeSelectorResolver.ResolveResult.NoMatch -> null
     }
+  }
+
+  /**
+   * Says — loudly, and with the fix in hand — that this step only worked because we searched every
+   * app. A recorded trail that leans on this pays a whole-desktop capture on every single run, and
+   * the trail itself gives no hint why it's slow. Naming the app and the one line that fixes it is
+   * the difference between a trail someone repairs and a trail someone learns to tolerate.
+   */
+  private fun warnResolvedInBackgroundApp(
+    selector: xyz.block.trailblaze.api.TrailblazeNodeSelector,
+    node: TrailblazeNode,
+  ) {
+    val appName = (node.driverDetail as? DriverNodeDetail.MacOsAx)?.pid?.let { nodePid ->
+      runCatching { MacOsAxNative.onScreenAppPids().firstOrNull { it.pid == nodePid }?.ownerName }.getOrNull()
+    }
+    // System.err, not Console.log: Console.log is verbosity-gated and this warning vanished into
+    // nothing when it mattered. A warning nobody sees is not a warning — and this one is the only
+    // thing standing between an author and a recorded trail that is mysteriously slow forever.
+    System.err.println(
+      "[MacOsAxDeviceManager] '${selector.description()}' was NOT in the active app — found it by " +
+        "searching every app${appName?.let { " (it's in $it)" } ?: ""}. That search is the slow path " +
+        "(a whole-desktop capture), and a recorded trail will pay it on every run. Bring the app to " +
+        "the front first: add `macos_activateApp` with its bundle id before this step" +
+        "${appName?.let { " (the app showing '$it')" } ?: ""}, or run this trail on --device desktop/all.",
+    )
   }
 
   private fun pollForSelector(

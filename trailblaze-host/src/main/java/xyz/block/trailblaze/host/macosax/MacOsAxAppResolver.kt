@@ -97,54 +97,75 @@ object MacOsAxAppResolver {
   /** One on-screen app the caller could switch to. */
   data class RunningApp(val name: String, val bundleId: String?)
 
-  @Volatile private var bundleIdCache: Pair<Long, Map<String, String>> = 0L to emptyMap()
+  @Volatile private var bundleIdCache: Pair<Long, Map<Int, String>> = 0L to emptyMap()
 
   /**
    * The apps that currently own an on-screen window, front-to-back, with their bundle ids — what a
    * snapshot lists so you know what else is running and how to switch to it.
    *
-   * Names come free from the window list (already read for z-order). Bundle ids need an AppleScript
-   * round trip through System Events, and that costs ~1.8 SECONDS — measured: it nearly doubled the
-   * cost of an active-app snapshot, eating most of the speed this scope exists to buy. So it's
-   * cached hard. The set of running apps changes only when you launch or quit one, which is rare
-   * next to how often a snapshot is taken; an app launched inside the window is still listed (its
-   * name comes from the window list), just without its bundle id until the cache turns over.
+   * Names and pids come free from the window list (already read for z-order). Bundle ids come from
+   * `lsappinfo list`, keyed by **pid**.
+   *
+   * Two reasons it's lsappinfo and not AppleScript. Speed: asking System Events for the same list
+   * costs ~0.6s, and up to ~1.8s when it's busy — enough to nearly double the cost of an active-app
+   * snapshot and eat most of the speed that scope exists to buy. `lsappinfo list` costs ~0.04s.
+   * Correctness: lsappinfo reports the PID alongside the bundle id, so apps are matched by identity
+   * rather than by display name — the AppleScript version had to join on name, which is exactly the
+   * kind of match that silently picks the wrong app when two of them share one.
    */
   fun onScreenApps(): List<RunningApp> {
-    val names = MacOsAxNative.onScreenAppPids().map { it.ownerName }
-    val byName = bundleIdsByAppName()
-    return names.map { RunningApp(name = it, bundleId = byName[it]) }
+    val onScreen = MacOsAxNative.onScreenAppPids()
+    val byPid = bundleIdsByPid()
+    return onScreen.map { RunningApp(name = it.ownerName, bundleId = byPid[it.pid]) }
   }
 
-  private fun bundleIdsByAppName(): Map<String, String> {
+  /**
+   * pid → bundle id, from `lsappinfo list`. Cached briefly: it's cheap, but a snapshot is taken far
+   * more often than an app is launched, and there's no reason to pay even 40ms per capture.
+   *
+   * The output is one block per app; a block carries `bundleID="…"` and, a few lines later,
+   * `pid = N`. Blocks without both (daemons, agents with no bundle) are skipped.
+   */
+  private fun bundleIdsByPid(): Map<Int, String> {
     val (cachedAt, cached) = bundleIdCache
     val now = System.currentTimeMillis()
     if (cached.isNotEmpty() && now - cachedAt < BUNDLE_ID_CACHE_MS) return cached
 
-    val script = """
-      set out to ""
-      tell application "System Events"
-        repeat with p in (every process whose background only is false)
-          try
-            set out to out & (name of p) & "\t" & (bundle identifier of p) & "\n"
-          end try
-        end repeat
-      end tell
-      return out
-    """.trimIndent()
-    val parsed = runOsascript(script)
-      ?.lineSequence()
-      ?.mapNotNull { line ->
-        val parts = line.split("\t")
-        if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) parts[0] to parts[1] else null
+    val output = runCatching {
+      val process = ProcessBuilder("lsappinfo", "list")
+        .redirectErrorStream(true)
+        .start()
+      val text = process.inputStream.bufferedReader().readText()
+      process.waitFor(LSAPPINFO_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+      text
+    }.getOrNull() ?: return cached
+
+    val parsed = mutableMapOf<Int, String>()
+    var pendingBundleId: String? = null
+    for (line in output.lineSequence()) {
+      val trimmed = line.trim()
+      when {
+        // A new block starts with `N) "Name" ASN:…` — anything carried over from the previous app
+        // must not leak into it.
+        BLOCK_HEADER.matches(trimmed) -> pendingBundleId = null
+        trimmed.startsWith("bundleID=") ->
+          pendingBundleId = BUNDLE_ID.find(trimmed)?.groupValues?.get(1)
+        trimmed.startsWith("pid =") -> {
+          val pid = PID.find(trimmed)?.groupValues?.get(1)?.toIntOrNull()
+          val bundleId = pendingBundleId
+          if (pid != null && bundleId != null) parsed[pid] = bundleId
+        }
       }
-      ?.toMap()
-      .orEmpty()
+    }
     if (parsed.isNotEmpty()) bundleIdCache = now to parsed
     return parsed
   }
 
-  private const val BUNDLE_ID_CACHE_MS = 60_000L
+  private val BLOCK_HEADER = Regex("""^\d+\)\s+".*""")
+  private val BUNDLE_ID = Regex("""bundleID="([^"]+)"""")
+  private val PID = Regex("""^pid = (\d+)""")
+  private const val BUNDLE_ID_CACHE_MS = 10_000L
+  private const val LSAPPINFO_TIMEOUT_SECONDS = 3L
 
   private fun runOsascript(script: String): String? = try {
     val proc = ProcessBuilder("osascript", "-e", script).redirectErrorStream(false).start()
