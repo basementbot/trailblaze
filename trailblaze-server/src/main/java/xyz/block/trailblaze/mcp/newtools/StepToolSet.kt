@@ -109,6 +109,12 @@ class StepToolSet(
     private const val POLL_INTERVAL_MS = 1_000L
 
     /**
+     * Ceiling on the post-tool observability snapshot. Generous for a slow whole-desktop capture,
+     * far below the 300s call-handler timeout it must never be allowed to reach.
+     */
+    internal const val SNAPSHOT_CAPTURE_TIMEOUT_MS = 30_000L
+
+    /**
      * Chooses the await-screen-state timeout for a given driver status string.
      *
      * Returns `null` when the driver reports a non-transient error (e.g. a real
@@ -765,6 +771,7 @@ class StepToolSet(
           startTime = toolStartTime,
           successful = true,
         )
+        if (!fast) emitDirectToolSnapshot(wrapper.name, traceId)
         recordedToolCalls.add(RecordedToolCall(toolName = wrapper.name, args = emptyMap()))
         Console.log("│ ✓ Executed: ${wrapper.name}")
       } catch (e: Exception) {
@@ -776,6 +783,9 @@ class StepToolSet(
           successful = false,
           exceptionMessage = e.message,
         )
+        // Capture the failing screen too — when a selector misses, what was actually on screen at
+        // that moment is the most useful thing the report can show you.
+        if (!fast) emitDirectToolSnapshot(wrapper.name, traceId)
         Console.log("│ ✗ Failed: ${wrapper.name} — ${e.message}")
         Console.log("└──────────────────────────────────────────────────────────────────────────────")
         emitObjectiveComplete(promptStep, stepStartTime, success = false, failureReason = "Tool ${wrapper.name} failed: ${e.message}")
@@ -1107,6 +1117,54 @@ class StepToolSet(
         timestamp = now,
       ),
     )
+  }
+
+  /**
+   * Records what the screen looked like after a directly-invoked tool ran, so a session driven with
+   * `trailblaze tool` produces a report you can actually look at.
+   *
+   * The trail runner logs a snapshot after every recordable tool — that's what puts the per-step
+   * screenshots in the report. The direct-tool path logged the tool call and nothing else, so
+   * exploring an app interactively (the way you work before you have a trail) produced a report of
+   * bare tool names with no picture of what any of them did.
+   *
+   * Shares [traceId] with the tool log so the report folds the two into one step (see
+   * `run-report-core.ts`). Skipped under `fast` / `--no-screenshots`, which exists precisely to
+   * avoid paying for captures.
+   *
+   * Bounded, and deliberately so: the capture is pure observability and it is not free (a
+   * whole-desktop macOS capture walks every on-screen app). A snapshot that fails or takes too long
+   * costs the report a picture; a snapshot that hangs costs the user their tool call. The tool has
+   * already executed and been logged by the time we get here, so abandoning the photo is free.
+   */
+  private suspend fun emitDirectToolSnapshot(toolName: String, traceId: TraceId) {
+    val emitter = logEmitter ?: return
+    val sessionId = sessionIdProvider?.invoke() ?: return
+    val save = screenshotSaver ?: return
+    try {
+      kotlinx.coroutines.withTimeoutOrNull(SNAPSHOT_CAPTURE_TIMEOUT_MS) {
+        val screenState = screenStateProvider(false, false, false) ?: return@withTimeoutOrNull
+        val bytes = screenState.screenshotBytes ?: return@withTimeoutOrNull
+        val savedPath = save(bytes) ?: return@withTimeoutOrNull
+        emitter.emit(
+          TrailblazeLog.TrailblazeSnapshotLog(
+            displayName = toolName,
+            screenshotFile = savedPath.substringAfterLast('/'),
+            viewHierarchy = screenState.viewHierarchy,
+            trailblazeNodeTree = screenState.trailblazeNodeTree,
+            viewHierarchyText = screenState.viewHierarchyTextRepresentation,
+            captureCoverage = screenState.captureCoverage,
+            deviceWidth = screenState.deviceWidth,
+            deviceHeight = screenState.deviceHeight,
+            session = sessionId,
+            timestamp = Clock.System.now(),
+            traceId = traceId,
+          ),
+        )
+      } ?: Console.log("[StepToolSet] snapshot after '$toolName' timed out; the tool result is unaffected")
+    } catch (e: Exception) {
+      Console.log("[StepToolSet] snapshot after '$toolName' failed: ${e.message}; the tool result is unaffected")
+    }
   }
 
   private fun emitDirectToolLog(
