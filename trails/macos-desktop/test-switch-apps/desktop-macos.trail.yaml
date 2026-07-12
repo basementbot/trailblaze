@@ -1,0 +1,19 @@
+- tools:
+  - macos_assertVisible:
+      nodeSelector:
+        macOsAx:
+          roleRegex: AXWindow
+          titleRegex: .*Handstand Sam.*
+      timeoutMs: 20000
+- prompts:
+  - step: Switch back to Calculator and confirm our work is still there
+    recording:
+      tools:
+      - macos_activateApp:
+          bundleId: com.apple.Calculator
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXStaticText
+              valueRegex: .?64
+          timeoutMs: 30000

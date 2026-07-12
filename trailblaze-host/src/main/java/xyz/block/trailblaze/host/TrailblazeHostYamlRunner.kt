@@ -725,8 +725,14 @@ object TrailblazeHostYamlRunner {
     // an app literally called "all" and died — the MCP tool path already understood the sentinel,
     // so the same trail that worked call-by-call failed the moment it was run as a trail.
     val wholeScreen = bundleId == xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID
-    val pid = if (wholeScreen) {
-      0
+    val frontmost = bundleId == xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice.FRONTMOST_INSTANCE_ID
+    val desktopScoped = wholeScreen || frontmost
+    val pid = if (desktopScoped) {
+      if (wholeScreen) {
+        xyz.block.trailblaze.host.macosax.MacOsAxTreeWalker.PID_ALL_APPS
+      } else {
+        xyz.block.trailblaze.host.macosax.MacOsAxTreeWalker.PID_FRONTMOST_APP
+      }
     } else {
       xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.ensureRunning(bundleId)
         ?: throw TrailblazeException(
@@ -744,7 +750,7 @@ object TrailblazeHostYamlRunner {
     // window to appear (re-activating each poll) so the first selector doesn't miss the UI. Best
     // effort: proceed after the deadline even if none appears (some apps are legitimately
     // windowless / menu-bar-only).
-    if (!wholeScreen) {
+    if (!desktopScoped) {
       val deadline = System.currentTimeMillis() + 8_000
       while (System.currentTimeMillis() < deadline) {
         xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.activate(bundleId)
@@ -753,8 +759,11 @@ object TrailblazeHostYamlRunner {
       }
     }
     val display = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.mainDisplaySize()
-    if (wholeScreen) {
-      onProgressMessage("Attached to the whole desktop (every on-screen app)")
+    if (desktopScoped) {
+      onProgressMessage(
+        if (wholeScreen) "Attached to the whole desktop (every on-screen app)"
+        else "Attached to the frontmost app (scope follows whichever app is in front)",
+      )
     } else {
       onProgressMessage("Attached to '$bundleId' (pid=$pid, windows=${xyz.block.trailblaze.host.macosax.MacOsAxNative.windowCount(pid)})")
     }

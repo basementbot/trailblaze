@@ -118,6 +118,12 @@ class MacOsAxConnectedDevice(
   /** True when this device captures the entire desktop (all on-screen apps) rather than one app. */
   val wholeScreen: Boolean get() = bundleId == WHOLE_SCREEN_INSTANCE_ID
 
+  /** True when this device follows whichever app is frontmost, rather than naming one. */
+  val frontmostApp: Boolean get() = bundleId == FRONTMOST_INSTANCE_ID
+
+  /** True for either desktop-scoped device — the ones that aren't a single named app. */
+  val desktopScoped: Boolean get() = wholeScreen || frontmostApp
+
   companion object {
     /**
      * Sentinel instance id (`--device desktop/all`) for the whole-desktop macOS device — the one
@@ -125,5 +131,13 @@ class MacOsAxConnectedDevice(
      * the iOS/Android/Web drivers. Captures every on-screen app under one tree.
      */
     const val WHOLE_SCREEN_INSTANCE_ID = "all"
+
+    /**
+     * Sentinel instance id (`--device desktop/frontmost`) for "whatever app I'm working in" — the
+     * DEFAULT macOS device, because capturing every on-screen app costs ~5 seconds and that is far
+     * too slow to drive a machine with. The frontmost app is where every click and keystroke lands
+     * anyway; the rest are listed by name in each snapshot, and `macos_activateApp` moves the scope.
+     */
+    const val FRONTMOST_INSTANCE_ID = "frontmost"
   }
 }

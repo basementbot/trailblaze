@@ -95,6 +95,54 @@ object MacOsAxTreeWalker {
    * A single shared [NodeIdCounter] spans all apps + the root so node ids stay unique across the
    * merged tree (required by hit-testing, ref generation, and index paths).
    */
+  /**
+   * The pid sentinels the whole driver uses to express capture SCOPE, so scope travels through the
+   * plumbing that already exists rather than as a parallel flag. (It used to be a separate
+   * `wholeScreen` boolean, and the two fell out of sync at two call sites, producing an empty tree
+   * and silently unmatchable selectors. One channel, no drift.)
+   */
+  const val PID_ALL_APPS = 0
+  const val PID_FRONTMOST_APP = -1
+
+  /** Captures at whatever scope [pid] names: every app, the frontmost app, or one specific app. */
+  fun captureFor(pid: Int): TrailblazeNode = when (pid) {
+    PID_ALL_APPS -> captureScreen()
+    PID_FRONTMOST_APP -> captureFrontmostApp()
+    else -> capture(pid)
+  }
+
+  /**
+   * Captures **only the app the user is currently working in**, under the same desktop root as a
+   * full capture — the default, because a full one is too slow to drive with.
+   *
+   * Walking every on-screen app costs ~5 seconds; walking just the frontmost one costs well under
+   * one, and the frontmost app is where all the action is: you cannot type into, click in, or read
+   * a window you haven't brought forward. The other apps are still *named* (see
+   * [MacOsAxScreenState]'s footer) so nothing is hidden — you switch with `macos_activateApp` and
+   * the scope follows you, or you ask for the whole desktop explicitly and pay for it.
+   *
+   * Occlusion is still computed against EVERY on-screen window, not just this app's: what covers
+   * the frontmost app is usually something belonging to another app, and an element buried under
+   * another app's window is exactly as unclickable as one buried under its own.
+   */
+  fun captureFrontmostApp(): TrailblazeNode {
+    val windows = MacOsAxNative.onScreenWindows()
+    val frontPid = windows.firstOrNull()?.pid
+      ?: return emptyDesktopRoot(NodeIdCounter())
+    val counter = NodeIdCounter()
+    val element = MacOsAxNative.createApplication(frontPid)
+    val appTree = try {
+      MacOsAxNative.enableEnhancedWebAccessibility(element)
+      walk(element, counter, depth = 1, ancestors = emptyList())
+    } catch (e: Exception) {
+      System.err.println("[MacOsAxTreeWalker] frontmost app pid=$frontPid failed: ${e.message}")
+      null
+    } finally {
+      MacOsAxNative.release(element)
+    }
+    return desktopRoot(counter, listOfNotNull(appTree).map { markOccluded(it, windows) })
+  }
+
   fun captureScreen(): TrailblazeNode {
     val counter = NodeIdCounter()
     // Walked in parallel, one task per app. Every AX read is a blocking cross-process round trip —
@@ -122,14 +170,21 @@ object MacOsAxTreeWalker {
     }.toList().filterNotNull()
     // Read once, not once per app: it's the same front-to-back window list for the whole capture.
     val onScreenWindows = MacOsAxNative.onScreenWindows()
-    return TrailblazeNode(
+    return desktopRoot(counter, appTrees.map { markOccluded(it, onScreenWindows) })
+  }
+
+  /**
+   * The synthetic desktop root every capture hangs under — not a real AX element, just a stable
+   * container so a one-app capture and a whole-desktop capture have the same shape and selectors,
+   * refs and the renderer don't have to care which one they were handed.
+   */
+  private fun desktopRoot(counter: NodeIdCounter, apps: List<TrailblazeNode>): TrailblazeNode =
+    TrailblazeNode(
       nodeId = counter.next(),
       bounds = null,
-      children = appTrees.map { markOccluded(it, onScreenWindows) },
+      children = apps,
       driverDetail = DriverNodeDetail.MacOsAx(
         pid = 0,
-        // Synthetic assembly root (not a real AX element) — a stable container for the per-app
-        // trees. Keyed with exact-style AX vocabulary so the renderer/selectors treat it uniformly.
         attributes = linkedMapOf(
           "AXRole" to MacOsAxAttributeValue.Str("MacOsScreen"),
           "AXTitle" to MacOsAxAttributeValue.Str("Screen"),
@@ -138,7 +193,8 @@ object MacOsAxTreeWalker {
         parameterizedAttributeNames = emptyList(),
       ),
     )
-  }
+
+  private fun emptyDesktopRoot(counter: NodeIdCounter): TrailblazeNode = desktopRoot(counter, emptyList())
 
   /**
    * Atomic because [captureScreen] walks the on-screen apps in parallel and they share one counter —

@@ -132,11 +132,22 @@ object TrailblazeDeviceService {
     val bundleId = trailblazeDeviceId.instanceId
     val display = xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.mainDisplaySize()
 
-    // Whole-desktop device (`desktop/all`): capture every on-screen app; nothing to launch.
+    // Desktop-scoped devices name no process, so their pid is a scope SENTINEL (see
+    // MacOsAxTreeWalker): 0 = every on-screen app, -1 = whichever app is frontmost right now.
+    // Nothing to launch or attach to in either case.
     if (bundleId == MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID) {
       return MacOsAxConnectedDevice(
         bundleId = bundleId,
-        pid = 0,
+        pid = xyz.block.trailblaze.host.macosax.MacOsAxTreeWalker.PID_ALL_APPS,
+        deviceWidth = display.width,
+        deviceHeight = display.height,
+      )
+    }
+    if (bundleId == MacOsAxConnectedDevice.FRONTMOST_INSTANCE_ID) {
+      return MacOsAxConnectedDevice(
+        bundleId = bundleId,
+        // Resolved per capture, not here: the frontmost app changes as the run drives the machine.
+        pid = xyz.block.trailblaze.host.macosax.MacOsAxTreeWalker.PID_FRONTMOST_APP,
         deviceWidth = display.width,
         deviceHeight = display.height,
       )

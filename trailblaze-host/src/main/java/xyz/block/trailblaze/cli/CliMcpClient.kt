@@ -1300,6 +1300,12 @@ class CliMcpClient(
             line.contains("(Android)") -> TrailblazeDevicePlatform.ANDROID
             line.contains("(iOS)") -> TrailblazeDevicePlatform.IOS
             line.contains("(Web") -> TrailblazeDevicePlatform.WEB
+            // DESKTOP renders as "(Compose Desktop)" — its displayName predates the macOS driver
+            // riding on the same platform. Without this branch the parser dropped every macOS
+            // device on the floor, so `trailblaze device list` showed only the browser and there
+            // was no way to DISCOVER `desktop/frontmost` at all: the daemon had found it, listed
+            // it, and the CLI silently threw it away.
+            line.contains("(${TrailblazeDevicePlatform.DESKTOP.displayName})") -> TrailblazeDevicePlatform.DESKTOP
             else -> return@mapNotNull null
           }
           val instanceId = line.substringBefore(" (").trim()

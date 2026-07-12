@@ -987,11 +987,22 @@ class TrailblazeDeviceManager(
           runCatching { xyz.block.trailblaze.host.macosax.MacOsAxNative.isProcessTrusted() }.getOrDefault(false) &&
           !xyz.block.trailblaze.host.macosax.MacOsAxAppResolver.isScreenLocked()
         ) {
+          // The frontmost-app device is listed FIRST because it's the one to reach for: capturing
+          // every on-screen app costs ~5s, which is too slow to drive a machine with, while the
+          // frontmost app — the only one that can receive a click or a keystroke — costs well under
+          // a second. `desktop/all` stays addressable for the rare case that genuinely needs it.
+          add(
+            TrailblazeConnectedDeviceSummary(
+              trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
+              instanceId = xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice.FRONTMOST_INSTANCE_ID,
+              description = "macOS Desktop (active app)",
+            )
+          )
           add(
             TrailblazeConnectedDeviceSummary(
               trailblazeDriverType = TrailblazeDriverType.MACOS_AX,
               instanceId = xyz.block.trailblaze.host.devices.MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID,
-              description = "macOS Desktop (all windows)",
+              description = "macOS Desktop (all windows — slower)",
             )
           )
         }

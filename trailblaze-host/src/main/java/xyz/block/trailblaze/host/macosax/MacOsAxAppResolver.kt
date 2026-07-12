@@ -94,6 +94,58 @@ object MacOsAxAppResolver {
     return after.take(30).contains("<true/>")
   }
 
+  /** One on-screen app the caller could switch to. */
+  data class RunningApp(val name: String, val bundleId: String?)
+
+  @Volatile private var bundleIdCache: Pair<Long, Map<String, String>> = 0L to emptyMap()
+
+  /**
+   * The apps that currently own an on-screen window, front-to-back, with their bundle ids — what a
+   * snapshot lists so you know what else is running and how to switch to it.
+   *
+   * Names come free from the window list (already read for z-order). Bundle ids need an AppleScript
+   * round trip through System Events, and that costs ~1.8 SECONDS — measured: it nearly doubled the
+   * cost of an active-app snapshot, eating most of the speed this scope exists to buy. So it's
+   * cached hard. The set of running apps changes only when you launch or quit one, which is rare
+   * next to how often a snapshot is taken; an app launched inside the window is still listed (its
+   * name comes from the window list), just without its bundle id until the cache turns over.
+   */
+  fun onScreenApps(): List<RunningApp> {
+    val names = MacOsAxNative.onScreenAppPids().map { it.ownerName }
+    val byName = bundleIdsByAppName()
+    return names.map { RunningApp(name = it, bundleId = byName[it]) }
+  }
+
+  private fun bundleIdsByAppName(): Map<String, String> {
+    val (cachedAt, cached) = bundleIdCache
+    val now = System.currentTimeMillis()
+    if (cached.isNotEmpty() && now - cachedAt < BUNDLE_ID_CACHE_MS) return cached
+
+    val script = """
+      set out to ""
+      tell application "System Events"
+        repeat with p in (every process whose background only is false)
+          try
+            set out to out & (name of p) & "\t" & (bundle identifier of p) & "\n"
+          end try
+        end repeat
+      end tell
+      return out
+    """.trimIndent()
+    val parsed = runOsascript(script)
+      ?.lineSequence()
+      ?.mapNotNull { line ->
+        val parts = line.split("\t")
+        if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) parts[0] to parts[1] else null
+      }
+      ?.toMap()
+      .orEmpty()
+    if (parsed.isNotEmpty()) bundleIdCache = now to parsed
+    return parsed
+  }
+
+  private const val BUNDLE_ID_CACHE_MS = 60_000L
+
   private fun runOsascript(script: String): String? = try {
     val proc = ProcessBuilder("osascript", "-e", script).redirectErrorStream(false).start()
     val out = proc.inputStream.bufferedReader().readText()

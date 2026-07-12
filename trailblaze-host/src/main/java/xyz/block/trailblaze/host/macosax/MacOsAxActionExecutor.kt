@@ -27,7 +27,8 @@ class MacOsAxActionExecutor(private val pid: Int) {
    * True when this executor targets the whole desktop (`--device desktop/all`) rather than one
    * app. [MacOsAxConnectedDevice.WHOLE_SCREEN_INSTANCE_ID] carries no process, so its pid is 0.
    */
-  private val wholeScreen: Boolean = pid == WHOLE_SCREEN_PID
+  /** True for a desktop-scoped device (every app, or the frontmost app) — i.e. not one named app. */
+  private val desktopScoped: Boolean = pid <= MacOsAxTreeWalker.PID_ALL_APPS
 
   /**
    * Captures the AX tree the selectors resolve against: every on-screen app for the whole-desktop
@@ -40,7 +41,7 @@ class MacOsAxActionExecutor(private val pid: Int) {
    * desktop-wide already.)
    */
   fun captureTree(): TrailblazeNode =
-    if (wholeScreen) MacOsAxTreeWalker.captureScreen() else MacOsAxTreeWalker.capture(pid)
+    MacOsAxTreeWalker.captureFor(pid)
 
   /** Dispatches [action]. Returns true on success. Tree is (re)captured lazily where needed. */
   fun execute(action: MacOsAxAction): Boolean = when (action) {
@@ -162,7 +163,7 @@ class MacOsAxActionExecutor(private val pid: Int) {
     // a person at the keyboard experiences the machine. A preceding tap is what moves focus: a
     // synthetic click raises the window it lands on, so "click the field, then type" works across
     // apps without this needing to guess an owner.
-    if (wholeScreen) return
+    if (desktopScoped) return
     val app = MacOsAxNative.createApplication(pid)
     try {
       MacOsAxNative.setBooleanAttribute(app, "AXFrontmost", true)

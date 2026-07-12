@@ -128,7 +128,15 @@ class MacOsAxDeviceManager(
   private fun executeAssertNotVisible(action: MacOsAxAction.AssertNotVisible): ExecutionResult {
     val startTime = System.currentTimeMillis()
     while (System.currentTimeMillis() - startTime < action.timeoutMs) {
-      val tree = captureTree()
+      // Judged against EVERY app, never just the active one. "Not visible" is a claim about the
+      // whole screen, and checking only the front app would pass the moment the thing you're
+      // watching for slipped behind another window — asserting its absence while it sits there in
+      // plain sight. The one assertion that cannot use the fast scope.
+      val tree = if (pid == MacOsAxTreeWalker.PID_FRONTMOST_APP) {
+        runCatching { MacOsAxTreeWalker.captureFor(MacOsAxTreeWalker.PID_ALL_APPS) }.getOrNull()
+      } else {
+        captureTree()
+      }
       if (tree != null) {
         val result = TrailblazeNodeSelectorResolver.resolve(tree, action.nodeSelector, templateContext)
         if (result is TrailblazeNodeSelectorResolver.ResolveResult.NoMatch) {
@@ -157,8 +165,38 @@ class MacOsAxDeviceManager(
     nodes.firstOrNull { (it.driverDetail as? DriverNodeDetail.MacOsAx)?.occluded == false }
       ?: nodes.first()
 
-  /** Polls a fresh capture until [selector] resolves (first match) or [timeoutMs] elapses. */
+  /**
+   * Polls a fresh capture until [selector] resolves or [timeoutMs] elapses — then, on the
+   * frontmost-app device, looks ONCE more across every app before giving up.
+   *
+   * The default scope is the active app because a whole-desktop capture is far too slow to poll
+   * with. But "I didn't look there" must never be reported as "it isn't there": a selector naming
+   * something in a background window would fail with a confident, wrong "not found". So the fast
+   * scope carries the polling, and the slow scope gets the last word — you pay the ~5s only in the
+   * case that would otherwise have been a lie, and a match found this way still tells the truth
+   * about itself, since the tap/assert gates refuse elements buried behind another window.
+   */
   private fun awaitSelector(
+    selector: xyz.block.trailblaze.api.TrailblazeNodeSelector,
+    timeoutMs: Long,
+  ): TrailblazeNode? {
+    pollForSelector(selector, timeoutMs)?.let { return it }
+    if (pid != MacOsAxTreeWalker.PID_FRONTMOST_APP) return null
+
+    Console.log(
+      "[MacOsAxDeviceManager] '${selector.description()}' not in the active app — widening to every " +
+        "on-screen app once before failing (this is the slow path)",
+    )
+    val everything = runCatching { MacOsAxTreeWalker.captureFor(MacOsAxTreeWalker.PID_ALL_APPS) }.getOrNull()
+      ?: return null
+    return when (val result = TrailblazeNodeSelectorResolver.resolve(everything, selector, templateContext)) {
+      is TrailblazeNodeSelectorResolver.ResolveResult.SingleMatch -> result.node
+      is TrailblazeNodeSelectorResolver.ResolveResult.MultipleMatches -> pickPreferredMatch(result.nodes)
+      is TrailblazeNodeSelectorResolver.ResolveResult.NoMatch -> null
+    }
+  }
+
+  private fun pollForSelector(
     selector: xyz.block.trailblaze.api.TrailblazeNodeSelector,
     timeoutMs: Long,
   ): TrailblazeNode? {
