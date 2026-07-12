@@ -8,6 +8,7 @@ import maestro.orchestra.Command
 import maestro.orchestra.InputTextCommand
 import maestro.orchestra.LaunchAppCommand
 import maestro.orchestra.PressKeyCommand
+import maestro.orchestra.TapOnPointCommand
 import xyz.block.trailblaze.AgentMemory
 import xyz.block.trailblaze.api.TrailblazeNodeSelector
 import xyz.block.trailblaze.host.macosax.MacOsAxAppResolver
@@ -104,6 +105,27 @@ data class MacOsTapOnElementTrailblazeTool(
       "No element matched selector ${nodeSelector.description()}.",
     )
   }
+}
+
+@Serializable
+@TrailblazeToolClass("macos_tapPoint")
+@LLMDescription(
+  "Click at an exact screen coordinate, in points from the top-left of the main display. " +
+    "This is the fallback for controls that Accessibility cannot see: apps that custom-draw " +
+    "their buttons (wxWidgets, Electron canvases, game UIs) and macOS's own system permission " +
+    "dialogs expose no clickable element to select, so `macos_tapOnElement` has nothing to match. " +
+    "Prefer macos_tapOnElement whenever the element IS in the tree — a selector survives the " +
+    "window moving or the layout changing, and a coordinate does not. Read the coordinate off a " +
+    "screenshot, and remember AX points are half of Retina screenshot pixels.",
+)
+data class MacOsTapPointTrailblazeTool(
+  @param:LLMDescription("X coordinate in points from the left edge of the main display.")
+  val x: Int,
+  @param:LLMDescription("Y coordinate in points from the top edge of the main display.")
+  val y: Int,
+) : MapsToMaestroCommands() {
+  override fun toMaestroCommands(memory: AgentMemory): List<Command> =
+    listOf(TapOnPointCommand(x = x, y = y))
 }
 
 @Serializable

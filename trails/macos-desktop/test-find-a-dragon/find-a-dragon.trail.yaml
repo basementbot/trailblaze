@@ -1,0 +1,85 @@
+- config:
+    title: 'Find a dragon to print: Bambu Studio, then keep looking in Chrome'
+    platform: desktop
+    driver: macos-ax
+- prompts:
+  - step: Open Bambu Studio and clear the startup prompts it greets you with
+    recording:
+      tools:
+      - macos_launchApp:
+          bundleId: com.bambulab.bambu-studio
+      # Bambu is wxWidgets and custom-draws these dialogs: they expose static text and an image to
+      # Accessibility, and NOT a single button. There is nothing for a selector to match, so the
+      # coordinates are not laziness — they are the only way in. Both prompts are dismissed rather
+      # than accepted: neither the config package nor the app update is something this trail is
+      # entitled to install on the machine it runs on.
+      - macos_tapPoint:
+          x: 1303
+          y: 798
+      - macos_tapPoint:
+          x: 1330
+          y: 799
+
+  - step: Search the online model catalog for a dragon
+    recording:
+      tools:
+      - macos_tapPoint:
+          x: 925
+          y: 147
+      - macos_inputText:
+          text: "dragon"
+      - macos_pressKey:
+          key: ENTER
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXLink
+              titleRegex: ".*[Dd]ragon.*"
+          timeoutMs: 20000
+
+  - step: Open the Flexi Dragon and confirm it is actually printable
+    recording:
+      tools:
+      - macos_tapOnElement:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXLink
+              titleRegex: "Flexi Dragon"
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXHeading
+              titleRegex: "Flexi Dragon"
+          timeoutMs: 30000
+      # The model is only useful if someone has published a print profile for it — that's the
+      # difference between "a picture of a dragon" and "a dragon I can put on the plate".
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXHeading
+              titleRegex: ".*Print Profile.*"
+          timeoutMs: 30000
+
+  - step: Keep shopping in the browser, where there are more of them
+    recording:
+      tools:
+      - macos_openUrl:
+          url: https://makerworld.com/en/search/models?keyword=dragon
+          browserBundleId: com.google.Chrome
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXTextField
+              valueRegex: ".*makerworld.com.*dragon.*"
+          timeoutMs: 30000
+      # descriptionRegex, not titleRegex — and this is the one real gotcha in the whole trail.
+      # Chrome publishes a link's text as AXDescription; the WebKit view embedded in Bambu Studio
+      # publishes the same thing as AXTitle. Identical role, identical words on screen, and the
+      # snapshot renders them identically because it collapses title/value/description into one
+      # display string. The titleRegex that matches in Bambu silently matches nothing here.
+      - macos_assertVisible:
+          nodeSelector:
+            macOsAx:
+              roleRegex: AXLink
+              descriptionRegex: ".*[Dd]ragon.*"
+          timeoutMs: 30000

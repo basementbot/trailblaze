@@ -8,6 +8,7 @@ drivers:
 tools:
   - macos_launchApp
   - macos_tapOnElement
+  - macos_tapPoint
   - macos_inputText
   - macos_pressKey
   - macos_assertVisible
