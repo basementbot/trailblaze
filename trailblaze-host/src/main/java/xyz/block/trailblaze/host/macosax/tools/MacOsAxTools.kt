@@ -211,20 +211,39 @@ data class MacOsActivateAppTrailblazeTool(
   override suspend fun execute(
     toolExecutionContext: TrailblazeToolExecutionContext,
   ): TrailblazeToolResult {
-    val activated = MacOsAxAppResolver.activate(bundleId)
-    if (!activated) {
-      return TrailblazeToolResult.Error.ExceptionThrown(
-        "Could not activate '$bundleId' — is it running? Use macos_launchApp to start it.",
+    val pid = MacOsAxAppResolver.runningPid(bundleId)
+      ?: return TrailblazeToolResult.Error.ExceptionThrown(
+        "'$bundleId' is not running. Use macos_launchApp to start it.",
       )
+
+    // Activate, then WAIT UNTIL IT IS ACTUALLY IN FRONT — and ask again if it isn't.
+    //
+    // Asking once and trusting it fails on the case that matters most: an app that was just
+    // launched. Its window doesn't exist yet, so the activation lands on nothing, the app finishes
+    // opening BEHIND whatever was already on screen, and every step after it acts on the wrong
+    // window. That's not hypothetical — the calculator trail failed exactly this way, launching
+    // behind a maximized browser, and only the occlusion gate stopped it from clicking into the
+    // browser instead. "I asked it to come forward" is not the same as "it is in front", and only
+    // the second one is safe to build on.
+    val deadline = System.currentTimeMillis() + FRONTMOST_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      MacOsAxAppResolver.activate(bundleId)
+      delay(ACTIVATION_SETTLE_MS)
+      if (MacOsAxNative.onScreenWindows().firstOrNull()?.pid == pid) {
+        return TrailblazeToolResult.Success(message = "Activated $bundleId (it is now in front)")
+      }
     }
-    // Activation is asynchronous: the window server raises the app on its own schedule, and a tool
-    // that reads the screen (or types) in the same millisecond still sees the outgoing app.
-    delay(ACTIVATION_SETTLE_MS)
-    return TrailblazeToolResult.Success(message = "Activated $bundleId")
+    return TrailblazeToolResult.Error.ExceptionThrown(
+      "'$bundleId' would not come to the front within ${FRONTMOST_TIMEOUT_MS}ms. It may still be " +
+        "opening, or another window is refusing to yield (a modal dialog, a full-screen app).",
+    )
   }
 
   companion object {
     private const val ACTIVATION_SETTLE_MS = 600L
+
+    /** Long enough to cover a cold app launch finishing and its window appearing. */
+    private const val FRONTMOST_TIMEOUT_MS = 8_000L
   }
 }
 

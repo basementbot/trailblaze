@@ -153,23 +153,31 @@ object MacOsAxEventSynthesizer {
    */
   fun typeText(text: String) {
     for (ch in text) {
-      postCharKey(ch, keyDown = true)
-      postCharKey(ch, keyDown = false)
+      // The unicode payload rides ONLY on the key-DOWN. It used to ride on the key-up too, which
+      // most apps quietly ignore — Calculator, Terminal and Bambu all typed fine — but Chrome
+      // honors it, so every character was inserted TWICE. That surfaced as a Gmail recipient of
+      // `someone@example.comsomeone@example.com`: an address belonging to nobody, in a message that
+      // was one keystroke from being sent. A real keyboard delivers the character once, on the way
+      // down; the key-up says only that the key came back up.
+      postCharKey(ch, keyDown = true, includeText = true)
+      postCharKey(ch, keyDown = false, includeText = false)
     }
   }
 
-  private fun postCharKey(ch: Char, keyDown: Boolean) {
+  private fun postCharKey(ch: Char, keyDown: Boolean, includeText: Boolean) {
     val event = cgEventCreateKeyboardEvent.invokePointer(
       arrayOf(Pointer.NULL, 0.toShort(), if (keyDown) 1 else 0),
     )
     if (event == null || event == Pointer.NULL) return
     try {
-      // `CGEventKeyboardSetUnicodeString` takes `UniChar*` — UTF-16 code units, 2 bytes each.
-      // Write a single 2-byte short; NOT `Memory.setChar`, which writes a native `wchar_t`
-      // (4 bytes on macOS) and overruns the buffer.
-      val buf = Memory(2)
-      buf.setShort(0, ch.code.toShort())
-      cgEventKeyboardSetUnicodeString.invokeVoid(arrayOf(event, 1, buf))
+      if (includeText) {
+        // `CGEventKeyboardSetUnicodeString` takes `UniChar*` — UTF-16 code units, 2 bytes each.
+        // Write a single 2-byte short; NOT `Memory.setChar`, which writes a native `wchar_t`
+        // (4 bytes on macOS) and overruns the buffer.
+        val buf = Memory(2)
+        buf.setShort(0, ch.code.toShort())
+        cgEventKeyboardSetUnicodeString.invokeVoid(arrayOf(event, 1, buf))
+      }
       cgEventPost.invokeVoid(arrayOf(K_CG_HID_EVENT_TAP, event))
     } finally {
       cfRelease.invokeVoid(arrayOf(event))

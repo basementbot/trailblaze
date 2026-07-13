@@ -8,6 +8,13 @@
       tools:
       - macos_launchApp:
           bundleId: com.apple.Calculator
+      # Bring it to the FRONT, not merely running. Launching an app that's already open doesn't
+      # necessarily raise it, and this trail failed exactly that way: Calculator came up behind a
+      # maximized browser window, and the driver refused to click a button the user cannot see
+      # (which is right — a click there would have hit the browser). Nothing that acts on a window
+      # should assume it is the one on top.
+      - macos_activateApp:
+          bundleId: com.apple.Calculator
       - macos_assertVisible:
           nodeSelector:
             macOsAx:

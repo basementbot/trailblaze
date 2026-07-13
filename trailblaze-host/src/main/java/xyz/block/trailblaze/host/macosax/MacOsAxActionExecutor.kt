@@ -125,19 +125,27 @@ class MacOsAxActionExecutor(private val pid: Int) {
    * Inputs [text]. Prefers appending to the focused element's `AXValue` (AX-native, no HID);
    * falls back to synthetic keyboard events.
    */
+  /**
+   * Types [text] into whatever has keyboard focus, as a person would.
+   *
+   * There is deliberately no `AXValue`-write fast path any more. Writing the value directly looked
+   * attractive — no HID events, no focus stealing — and it failed three different ways in three
+   * different apps:
+   *
+   *  - Calculator ACCEPTED the write and ignored it, so the setter's success was a lie and the text
+   *    never appeared.
+   *  - Safari's address bar swallowed it the same way.
+   *  - Chrome (Gmail's recipient field) HONORED it *and* fired its own insertion, so the address
+   *    came out as `someone@example.comsomeone@example.com` — an email addressed to nobody, one
+   *    keystroke from being sent.
+   *
+   * Every guard I added made a different app worse: verify by exact echo and Chrome's reformatted
+   * value looks like a failure (so it gets typed twice); verify by "did it change" and Chrome still
+   * doubles, because both the write and the app's own insertion take. A web field is not a value to
+   * be assigned, it's a control that reacts to input, and the only way to be right in all three
+   * apps is the one a person uses: bring the app forward and type.
+   */
   fun inputText(text: String): Boolean {
-    val handled = withFocusedElement { el ->
-      val existing = focusedStringValue(el) ?: ""
-      val expected = existing + text
-      // Read back rather than trusting the setter's return code. `AXUIElementSetAttributeValue`
-      // reports success whenever the element ACCEPTS the message — not when the app honors it.
-      // Calculator's focused edit field and Safari's address bar both swallow `AXValue` writes
-      // this way, so a bare `setStringAttribute(...)` returns true, we skip the synthetic-HID
-      // fallback, and the text silently never appears. Confirming the value actually changed is
-      // the only reliable signal that the AX-native path worked.
-      MacOsAxNative.setStringAttribute(el, "AXValue", expected) && focusedStringValue(el) == expected
-    }
-    if (handled) return true
     activateTargetApp()
     MacOsAxEventSynthesizer.typeText(text)
     return true
