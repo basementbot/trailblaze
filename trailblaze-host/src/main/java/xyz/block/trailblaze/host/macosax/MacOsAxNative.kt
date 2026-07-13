@@ -435,13 +435,27 @@ object MacOsAxNative {
     // cheerfully reported a window it had not moved. Resizing can also shift a window's origin, so
     // position must be applied last or it gets undone by the resize that follows it.
     setStructAttribute(window, "AXSize", K_AX_VALUE_CG_SIZE, width.toDouble(), height.toDouble())
-    setStructAttribute(window, "AXPosition", K_AX_VALUE_CG_POINT, x.toDouble(), y.toDouble())
 
-    // Read the frame back and hand the ACTUAL one to the caller. The setter's return code is not
-    // evidence, and "it refused" and "it did what it could" are different answers that the caller
-    // must be able to tell apart.
-    return readWindowFrame(window)
+    // Re-apply the origin until it sticks. Some apps re-lay out ASYNCHRONOUSLY after a resize and
+    // move themselves afterwards, so a position set in the same breath is overwritten a moment
+    // later — Terminal cascades its window down-and-right on every resize, and each attempt to place
+    // it just chased it further across the screen. Setting the origin, letting the app settle, and
+    // checking is the only way to actually land it.
+    var frame: List<Int>? = null
+    repeat(POSITION_ATTEMPTS) {
+      setStructAttribute(window, "AXPosition", K_AX_VALUE_CG_POINT, x.toDouble(), y.toDouble())
+      Thread.sleep(POSITION_SETTLE_MS)
+      frame = readWindowFrame(window)
+      val current = frame ?: return@repeat
+      if (closeEnough(current[0], x) && closeEnough(current[1], y)) return current
+    }
+    // Return the ACTUAL frame either way — the setter's return code is not evidence, and "it
+    // refused" and "it did what it could" are different answers the caller must tell apart.
+    return frame
   }
+
+  private const val POSITION_ATTEMPTS = 4
+  private const val POSITION_SETTLE_MS = 150L
 
   /**
    * True when the window ended up where it was asked to be. Judged on the ORIGIN only, deliberately.
