@@ -423,24 +423,27 @@ new features + hardware-specific work automation can't reach yet.
 -->
 
 ---
+layout: center
+---
 
 <div class="text-sm opacity-50 absolute top-4 left-4">ACT 0</div>
 
 # Ten years on this problem
 
-<div class="pt-2 space-y-4">
-  <div class="flex items-center gap-8">
-    <div class="flex-1"><b>2016</b> — <i>"Espresso: A Screenshot is Worth 1,000 Words"</i></div>
-    <img src="./public/talk-2016.jpg" class="h-40 rounded-lg shadow-lg" />
+<div class="grid grid-cols-2 gap-10 pt-6 max-w-4xl mx-auto">
+  <div class="text-center">
+    <img src="./public/talk-2016.jpg" class="rounded-lg shadow-lg w-full" />
+    <div class="pt-3 text-lg"><b>2016</b> — <i>"A Screenshot is Worth 1,000 Words"</i></div>
   </div>
-  <div class="flex items-center gap-8">
-    <div class="flex-1"><b>2025</b> — <i>"AI Driven Mobile Testing"</i> (with Brian Gardner)</div>
-    <img src="./public/talk-2025.jpg" class="h-40 rounded-lg shadow-lg" />
+  <div class="text-center">
+    <img src="./public/talk-2025.jpg" class="rounded-lg shadow-lg w-full" />
+    <div class="pt-3 text-lg"><b>2025</b> — <i>"AI Driven Mobile Testing"</i> · Brian Gardner</div>
   </div>
-  <div><b>2026</b> — 1.5 years in production, and where it's going</div>
 </div>
 
-<div class="pt-4 opacity-70">
+<div class="pt-8 text-2xl text-center"><b>2026</b> — in production, and where it's going</div>
+
+<div class="pt-4 text-center text-lg opacity-70">
 
 *By the end you'll see what the map is — you're already building it.*
 
