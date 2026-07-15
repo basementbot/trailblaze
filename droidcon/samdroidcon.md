@@ -41,23 +41,32 @@ layout: center
 
 # First — what *is* Trailblaze?
 
-<div class="pt-6">
-<img src="./public/asset-d-github-repo.png" class="rounded-xl shadow-2xl mx-auto max-h-72" alt="github.com/block/trailblaze" />
+<div class="grid grid-cols-2 gap-10 items-center pt-4">
+
+<div>
+<img src="./public/asset-d-github-repo.png" class="rounded-xl shadow-2xl w-full" alt="github.com/block/trailblaze" />
 </div>
 
-<div v-click class="pt-6 text-xl">
+<div class="space-y-5">
 
-**Open source.** Apache-2.0 · <span class="opacity-70">github.com/block/trailblaze</span>
+<div v-click class="text-xl">
+
+**Open source.** Apache-2.0
+<span class="opacity-70">github.com/block/trailblaze</span>
 
 </div>
 
-<div v-click class="pt-5">
+<div v-click>
 
 ```bash
 brew install block/tap/trailblaze
 ```
 
-<div class="pt-3 text-xl opacity-80">You can use it <b>right now</b> — during this talk.</div>
+<div class="pt-2 text-xl opacity-80">You can use it <b>right now</b> — during this talk.</div>
+
+</div>
+
+</div>
 
 </div>
 
@@ -88,7 +97,7 @@ layout: center
 
 <div class="text-sm opacity-50 absolute top-4 left-4">ACT 0 · What is Trailblaze?</div>
 
-# Where it came from
+# How we got here
 
 <div class="pt-8 space-y-6 text-2xl">
   <div v-click><b>Nov 2024</b> — an agent that could drive a journey <span class="opacity-60">· every run needed the LLM</span></div>
@@ -122,9 +131,12 @@ layout: center
 
 # And we *use* it
 
-<div class="pt-8 text-2xl">
+<div class="pt-8 text-3xl font-bold">
+<span v-click>Square</span><span v-click><span class="opacity-40">&nbsp;·&nbsp;</span>Cash App</span>
+</div>
 
-**Square** &nbsp;·&nbsp; **Cash App**
+<div v-click class="pt-6 text-2xl">
+
 Real apps. Real devices. **Every day, in CI.**
 
 </div>
@@ -132,7 +144,7 @@ Real apps. Real devices. **Every day, in CI.**
 <div v-click class="pt-10 text-xl opacity-80">
 
 Not a demo. Not a prototype.
-This talk is what **1.5 years of running it for real** taught us.
+This talk is what **running it for real** taught us.
 
 </div>
 
@@ -157,9 +169,14 @@ layout: center
 
 # AI is supposed to do *everything*
 
-<div v-click class="pt-8 text-xl">
+<div v-click class="pt-8 text-2xl italic opacity-90">
 
-*"Validate the new real-time cart updates — and make it a test."*
+"Validate the new real-time cart updates — and make it a test."
+
+</div>
+
+<div v-click class="pt-6 text-xl">
+
 An agent **drives a real phone**: taps, edits the cart, watches the totals.
 It just… **does it**.
 
