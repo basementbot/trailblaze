@@ -240,6 +240,12 @@ Iterate from **recorded trails** + **natural-language steps**.
 
 </div>
 
+<div v-click class="pt-6 text-lg opacity-60">
+
+Coming: a **waypoint map** *(experimental)* — fewer cycles to a solid trail.
+
+</div>
+
 <!--
 NEW (plane review, 2026-07-15 — Sam). The honest counterweight to the hype slide before it:
 the dream (agent drives the cart) is real, but getting a RELIABLE trail out of it is not
@@ -253,6 +259,11 @@ BEATS (Sam's raw points, kept to short bullets):
   Teaser only — trailheads get their FORMAL slide in Act 2 (line ~871). Don't over-explain here.
 - The iteration loop: RECORDED TRAIL FILES + the NATURAL-LANGUAGE STEPS give the agent
   concrete material to iterate against, not a blank page.
+- WAYPOINTS (experimental) — PLANTS the Act 6 payoff ("Next: waypoints" + "Your app, as a
+  map", the subway/graph asset). Frame it exactly as Act 6 does: not fully proven, but bullish.
+  The vision: because authoring a solid trail takes so many cycles today, a waypoint map the
+  agent can navigate could make that far more seamless. Keep it a QUIET forward-look here (dim,
+  one line) — the real reveal is Act 6. Say it, don't dwell.
 PLACEMENT: sits right after the cart user-journey example (route /5), as its own beat so it
 doesn't re-crowd that slide. If it reads too early (trailheads not yet defined), the fallback
 is to move it next to "One user journey" / into Act 2 — flag for Sam.
