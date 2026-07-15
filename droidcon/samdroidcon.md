@@ -170,23 +170,22 @@ layout: center
 
 # AI is supposed to do *everything*
 
-<div v-click class="pt-8 text-2xl italic opacity-90">
+<div v-click class="pt-8 text-3xl italic opacity-90">
 
-"Validate the new real-time cart updates — and make it a test."
-
-</div>
-
-<div v-click class="pt-6 text-xl">
-
-An agent **drives a real phone**: taps, edits the cart, watches the totals.
-It just… **does it**.
+"Validate the cart updates — make it a test."
 
 </div>
 
-<div v-click class="pt-8 text-xl opacity-80">
+<div v-click class="pt-8 text-3xl">
 
-On mobile it still **falls short** where it counts:
-**controlling devices** &nbsp;·&nbsp; **testing what matters**
+It drives a real phone. It just… **does it**.
+
+</div>
+
+<div v-click class="pt-10 text-3xl">
+
+But it **falls short**:
+<div class="pt-2 text-2xl opacity-80"><b>controlling devices</b> &nbsp;·&nbsp; <b>testing what matters</b></div>
 
 </div>
 
@@ -308,14 +307,12 @@ ASSET A pt 1 (slide 14) is the visual proof: blaze vs replay videos, 6m26s vs 2m
 
 # The missing link
 
-<v-clicks>
-
-- It **did it** — but what *exactly* did it do?
-- How do you run *that* again — **deterministically**?
-- The objective ↔ actions **link is lost**
-- The objective is the **what** · thrown away
-
-</v-clicks>
+<div class="pt-6 space-y-6 text-3xl">
+  <div v-click>What <i>exactly</i> did it do?</div>
+  <div v-click>Run it again — <b>deterministically</b>?</div>
+  <div v-click>The <b>link is lost</b></div>
+  <div v-click>The objective — <b>thrown away</b></div>
+</div>
 
 <!--
 REWRITTEN round 10 — FALLS-SHORT REASON #2, answering slide 2's dream directly: the
@@ -346,13 +343,13 @@ returns in Act 2. Don't leave dangling. (Not "handwritten" — recordings are ea
 
 # One user journey.
 
-<div class="pt-4 text-lg opacity-60">
+<div class="pt-6 text-2xl opacity-70">
 
-what a user must **always** be able to do — the unit of quality
+what a user must **always** do — the unit of quality
 
 </div>
 
-<div class="pt-6 text-2xl opacity-70">
+<div class="pt-10 text-4xl">
 
 You write it **once**.
 
