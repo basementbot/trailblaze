@@ -24,6 +24,19 @@ class: cover text-center
 Droidcon USA 2026<br>Sam Edwards · Block
 </div>
 
+<style>
+/* Back-of-room legibility: enlarge default markdown bullet lists deck-wide. */
+/* Raw markdown lists only; explicitly-sized custom slides are untouched. */
+.slidev-layout ul > li {
+  font-size: 1.5rem;
+  line-height: 1.55;
+  margin-top: 0.45rem;
+}
+.slidev-layout ul > li ul > li {
+  font-size: 1.15rem;
+}
+</style>
+
 <!--
 DECK v7 — Act 0 rethreaded (round 10): hype → the dream works → falls short ×2
 (CI economics, missing link) → user journeys → seven targets → ten years.
