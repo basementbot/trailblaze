@@ -37,7 +37,123 @@ samdroidcon-notes.md = source of truth: changelog, cut-priority list, Plan B, Q&
 layout: center
 ---
 
-<div class="text-sm opacity-50 absolute top-4 left-4">ACT 0 · The problem · 0:00–4:00</div>
+<div class="text-sm opacity-50 absolute top-4 left-4">ACT 0 · What is Trailblaze? · 0:00–2:30</div>
+
+# First — what *is* Trailblaze?
+
+<div class="pt-6">
+<img src="./public/asset-d-github-repo.png" class="rounded-xl shadow-2xl mx-auto max-h-72" alt="github.com/block/trailblaze" />
+</div>
+
+<div v-click class="pt-6 text-xl">
+
+**Open source.** Apache-2.0 · <span class="opacity-70">github.com/block/trailblaze</span>
+
+</div>
+
+<div v-click class="pt-5">
+
+```bash
+brew install block/tap/trailblaze
+```
+
+<div class="pt-3 text-xl opacity-80">You can use it <b>right now</b> — during this talk.</div>
+
+</div>
+
+<!--
+NEW (plane review, FB-1 — Sam): the deck used to jump straight from the cover into the
+problem statement. But this talk is about TRAILBLAZE + the problem, not the problem alone.
+Bring people up to speed FIRST: what it is, that it's open source, how we use it. Then the
+problem explains WHY it's shaped the way it is.
+BEAT: say the one-liner flat — "Trailblaze is an AI-driven UI testing framework. We built it
+at Block, it's open source, Apache-2.0, and it's on GitHub right now."
+CLICK: the realness beat. This is proof-of-existence, not a pitch. The card is GitHub's own
+OG render (org, description, contributors, issues, stars, forks) — it reads as "real project,"
+which is the entire job of this slide.
+ASSET: public/asset-d-github-repo.png — GitHub's OpenGraph card, fetched live 2026-07-14
+(opengraph.githubassets.com/1/block/trailblaze). Regenerate the same way; it auto-updates
+its own numbers. NOTE it renders LIGHT on our dark deck — that's deliberate, reads as a
+screenshot. If Sam prefers a true desktop screenshot of the repo page, swap the file and
+keep the path.
+NUMBERS AS OF 2026-07-14: 247 stars · 19 forks · 11 contributors · 21 open issues.
+Don't say the star count out loud — 247 is honest but modest, and pointing at it invites the
+wrong read. The repo CHROME (Block org, Apache-2.0, contributors, activity) carries "real"
+better than the number does.
+-->
+
+---
+layout: center
+---
+
+<div class="text-sm opacity-50 absolute top-4 left-4">ACT 0 · What is Trailblaze?</div>
+
+# Where it came from
+
+<div class="pt-8 space-y-6 text-2xl">
+  <div v-click><b>Nov 2024</b> — an agent that could drive a journey <span class="opacity-60">· every run needed the LLM</span></div>
+  <div v-click><b>Mar 2025</b> — <b>Trailblaze</b></div>
+  <div v-click><b>Droidcon NYC 2025</b> — <b>open sourced</b></div>
+  <div v-click class="pt-2"><b>Today</b> — in production</div>
+</div>
+
+<!--
+NEW (plane review, FB-1). Sam's own past-talk style: DATED MILESTONE TIMELINE — narrate the
+evolution as a sequence, not a confession. Two beats, then today. No dwelling — this is
+context, not the talk.
+DRAGONCRAWL DELIBERATELY CUT (Sam, plane review): do not name it on the slide or say it out
+loud. The 2024 predecessor is referred to generically ("an agent") — nothing before Nov 2024
+gets a name.
+Nov 2024 beat: we could point an agent at a journey and it would drive it. Closer — but every
+run still needed the LLM. That is EXACTLY the CI-economics problem the next act opens on, so
+this line PLANTS it: say it and let it sit, don't resolve it here.
+Mar 2025 — Trailblaze: natural language on top, determinism underneath. The refrain lives here.
+DROIDCON NYC 2025 — open sourced ON A DROIDCON STAGE, one year ago, with Brian. Best beat on
+the slide for THIS room: "we open sourced it at droidcon last year — a lot has happened since."
+LESS WORDS (Sam, plane review): don't say "1.5 years in production" — the dates already do
+that math for the audience. "Today — in production" is the whole line. Let the timeline speak.
+-->
+
+---
+layout: center
+---
+
+<div class="text-sm opacity-50 absolute top-4 left-4">ACT 0 · What is Trailblaze?</div>
+
+# And we *use* it
+
+<div class="pt-8 text-2xl">
+
+**Square** &nbsp;·&nbsp; **Cash App**
+Real apps. Real devices. **Every day, in CI.**
+
+</div>
+
+<div v-click class="pt-10 text-xl opacity-80">
+
+Not a demo. Not a prototype.
+This talk is what **1.5 years of running it for real** taught us.
+
+</div>
+
+<!--
+NEW (plane review, FB-1). Third beat of the intro arc: it's real, it's ours, it's load-bearing.
+Sam's stated goal for the whole talk (notes, 2026-07-11 reframe): "how Block is using
+Trailblaze in production (Square + Cash, 1.5+ years) and the philosophy of where it's going."
+This slide states that thesis OUT LOUD, up front, so the audience knows what kind of talk
+they're in — a production-lessons talk, not a product pitch.
+DELIBERATELY HELD BACK: the scale numbers. Seven targets and "hundreds of trails" are the
+Act 0 gut-punch two slides later — do NOT spend them here. Keep this qualitative.
+HAND-OFF into the problem statement (the pivot the whole intro exists to earn):
+"So that's the what. To explain why it looks the way it does — I have to start with the
+problem we had." → next slide: "AI is supposed to do everything."
+-->
+
+---
+layout: center
+---
+
+<div class="text-sm opacity-50 absolute top-4 left-4">ACT 0 · The problem · 2:30–6:30</div>
 
 # AI is supposed to do *everything*
 
@@ -113,10 +229,14 @@ ASSET A pt 1 (slide 14) is the visual proof: blaze vs replay videos, 6m26s vs 2m
 
 # The missing link
 
+<v-clicks>
+
 - It **did it** — but what *exactly* did it do?
 - How do you run *that* again — **deterministically**?
 - The objective ↔ actions **link is lost**
 - The objective is the **what** · thrown away
+
+</v-clicks>
 
 <!--
 REWRITTEN round 10 — FALLS-SHORT REASON #2, answering slide 2's dream directly: the
