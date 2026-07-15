@@ -214,6 +214,56 @@ layout: center
 
 <div class="text-sm opacity-50 absolute top-4 left-4">ACT 0</div>
 
+# It's not that easy — yet
+
+<div v-click class="pt-8 text-2xl">
+
+A reliable trail takes **many cycles** — not one shot.
+
+</div>
+
+<div v-click class="pt-3 text-xl opacity-70">
+
+Maybe never one-shot — but it keeps **getting better**.
+
+</div>
+
+<div v-click class="pt-8 text-xl">
+
+**Trailheads** — the agent knows where to start.
+
+</div>
+
+<div v-click class="pt-3 text-xl">
+
+Iterate from **recorded trails** + **natural-language steps**.
+
+</div>
+
+<!--
+NEW (plane review, 2026-07-15 — Sam). The honest counterweight to the hype slide before it:
+the dream (agent drives the cart) is real, but getting a RELIABLE trail out of it is not
+one-shot. Give the room space to sit in this — it earns trust and motivates the whole rest
+of the talk (the determinism/replay machinery exists precisely because one-shot isn't enough).
+BEATS (Sam's raw points, kept to short bullets):
+- Reliable trail authoring currently takes MANY CYCLES — we're finding this in practice.
+- It probably will NEVER be perfectly one-shot — but we keep doing things to make it better.
+  (Optimistic, not defeatist — the "— yet" in the title carries this.)
+- TRAILHEADS (established as part of Trailblaze) help a lot: the agent knows where to START.
+  Teaser only — trailheads get their FORMAL slide in Act 2 (line ~871). Don't over-explain here.
+- The iteration loop: RECORDED TRAIL FILES + the NATURAL-LANGUAGE STEPS give the agent
+  concrete material to iterate against, not a blank page.
+PLACEMENT: sits right after the cart user-journey example (route /5), as its own beat so it
+doesn't re-crowd that slide. If it reads too early (trailheads not yet defined), the fallback
+is to move it next to "One user journey" / into Act 2 — flag for Sam.
+-->
+
+---
+layout: center
+---
+
+<div class="text-sm opacity-50 absolute top-4 left-4">ACT 0</div>
+
 # An LLM on every run?
 
 <div class="pt-6 text-2xl">
