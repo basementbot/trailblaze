@@ -99,28 +99,29 @@ layout: center
 
 # How we got here
 
-<div class="pt-8 space-y-6 text-2xl">
-  <div v-click><b>Nov 2024</b> — an agent that could drive a journey <span class="opacity-60">· every run needed the LLM</span></div>
-  <div v-click><b>Mar 2025</b> — <b>Trailblaze</b></div>
-  <div v-click><b>Droidcon NYC 2025</b> — <b>open sourced</b></div>
-  <div v-click class="pt-2"><b>Today</b> — in production</div>
+<div class="pt-8 space-y-5 text-2xl">
+  <div v-click><b>Nov 2024</b> — proof of concept</div>
+  <div v-click><b>Mar 2025</b> — full-time · named it <b>Trailblaze</b></div>
+  <div v-click><b>Droidcon NYC 2025</b> — open sourced</div>
+  <div v-click><b>Since</b> — drivers · platforms · trail files · CLI · MCP</div>
+  <div v-click class="pt-1"><b>Last month</b> — <code>brew install</code></div>
 </div>
 
 <!--
 NEW (plane review, FB-1). Sam's own past-talk style: DATED MILESTONE TIMELINE — narrate the
 evolution as a sequence, not a confession. Two beats, then today. No dwelling — this is
 context, not the talk.
-DRAGONCRAWL DELIBERATELY CUT (Sam, plane review): do not name it on the slide or say it out
-loud. The 2024 predecessor is referred to generically ("an agent") — nothing before Nov 2024
-gets a name.
-Nov 2024 beat: we could point an agent at a journey and it would drive it. Closer — but every
-run still needed the LLM. That is EXACTLY the CI-economics problem the next act opens on, so
-this line PLANTS it: say it and let it sit, don't resolve it here.
-Mar 2025 — Trailblaze: natural language on top, determinism underneath. The refrain lives here.
-DROIDCON NYC 2025 — open sourced ON A DROIDCON STAGE, one year ago, with Brian. Best beat on
-the slide for THIS room: "we open sourced it at droidcon last year — a lot has happened since."
-LESS WORDS (Sam, plane review): don't say "1.5 years in production" — the dates already do
-that math for the audience. "Today — in production" is the whole line. Let the timeline speak.
+DETAILS FROM SAM (plane review, 2026-07-15) — bullets stay SHORT, the story is spoken:
+- Nov 2024: officially started the PROOF OF CONCEPT (don't name the pre-POC predecessor).
+- Mar 2025: went FULL-TIME on it and PICKED THE NAME (Trailblaze).
+- Droidcon NYC 2025: open sourced on a droidcon stage, one year ago, with Brian — best beat
+  for THIS room ("we open sourced it at droidcon last year — a lot has happened since").
+- "Since": lots of evolutions to talk through — drivers, platform support, the trail file
+  format, USER INTERACTION, the CLI, and MCP. Slide lists a representative subset; expand the
+  ones that matter aloud (user-interaction folded into the spoken version to keep the bullet short).
+- "Last month": shipped to Homebrew — `brew install block/tap/trailblaze` (~Jun 2026). The full
+  command lives on slide 2; here it's just the MILESTONE, not the CTA. Confirm the ~1-month
+  timing before the talk.
 -->
 
 ---
