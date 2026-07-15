@@ -788,7 +788,86 @@ To cut: delete this whole slide block (--- to ---).
 Unified validation of a user experience. Because it's sourced in git, you can drop the
 recordings for one platform (or all) and have the LLM re-materialize — it has the past
 recording and all its context to work from.
-HAND-OFF: "Here's what that journey looks like as one file."
+HAND-OFF: "Here's the same journey — and how little you need to start."
+-->
+
+---
+layout: center
+---
+
+<div class="text-sm opacity-50 absolute top-4 left-4">ACT 2</div>
+
+# The same journey, three ways
+
+<div class="text-xl opacity-70 pb-2">Create a contact · Google Contacts · <b>Android + iOS</b></div>
+
+<div class="grid grid-cols-3 gap-6 pt-4 text-left items-start">
+
+<div>
+<div class="pb-2 text-xl"><b>1 · Just words</b></div>
+<div class="text-base opacity-70 pb-2">any platform, day one</div>
+
+```yaml
+- step: Enter the name
+- step: Enter a phone
+- step: Save
+```
+
+<div class="pt-2 text-lg opacity-80">The agent runs the prose. <b>No recordings.</b></div>
+</div>
+
+<div v-click>
+<div class="pb-2 text-xl"><b>2 · + one recording</b></div>
+<div class="text-base opacity-70 pb-2">Android earns it</div>
+
+```yaml
+- step: Enter the name
+  recording:
+    android:
+      - inputText: Ada Lovelace
+```
+
+<div class="pt-2 text-lg opacity-80"><b>Android replays</b> · iOS via agent</div>
+</div>
+
+<div v-click>
+<div class="pb-2 text-xl"><b>3 · + both</b></div>
+<div class="text-base opacity-70 pb-2">now it's fully pinned</div>
+
+```yaml
+- step: Enter the name
+  recording:
+    android:
+      - inputText: Ada Lovelace
+    ios:
+      - inputText: Ada Lovelace
+```
+
+<div class="pt-2 text-lg opacity-80"><b>Both replay</b> · zero-LLM</div>
+</div>
+
+</div>
+
+<!--
+NEW (plane review, 2026-07-15 — Sam). Show the SAME user journey at three fidelities so the
+audience sees recordings are OPTIONAL and INCREMENTAL — you never start from a blank YAML.
+RUNNING EXAMPLE = CONTACTS (Sam): Google Contacts, the public repo's committed corpus, across
+Android + iOS. Real target ids: com.google.android.contacts / com.apple.MobileAddressBook;
+real trailhead = contacts_android_createContact (ACTION_INSERT → new-contact editor).
+THE BUILD (three columns, cols 2–3 on click):
+  1. Just words — pure NL steps, no recording: block. Runs on EVERY platform via the agent,
+     day one. This is the "version with no recorded steps" Sam asked for.
+  2. + one recording — Android gets a recording and replays deterministically; iOS with no
+     slot still runs the prose through the agent. Recordings are earned per platform.
+  3. + both — Android AND iOS recorded → the step replays zero-LLM everywhere.
+LEGIBILITY: deliberately ONE step ("Enter the name") shown across all three so the YAML stays
+big and the diff is obvious from the back. Recordings simplified to a single inputText per
+platform — real recordings also carry the tapOn to focus the field; say that aloud, don't
+crowd the slide.
+NOTE / FOLLOW-UP for Sam: the neighbouring legacy slides ("Scale found our design flaw",
+"One file = the user journey") still use the COFFEE example (QE sender / latte). If contacts
+is now THE running example, those two should switch to contacts too — flagged, not done here.
+HAND-OFF: "And here's the full shape of one of these files." → One file = the user journey.
 -->
 
 ---
